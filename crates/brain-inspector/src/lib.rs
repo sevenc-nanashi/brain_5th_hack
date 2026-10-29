@@ -6,6 +6,7 @@ use reflex::display::{HEIGHT, WIDTH};
 
 #[derive(Clone, Copy, Default)]
 pub struct Measurements {
+    pub audio: AudioMeasurements,
     pub screen: [i16; 4],
     pub pm_real: [i16; 4],
     pub pm_client: [i16; 4],
@@ -21,6 +22,53 @@ pub struct Measurements {
     pub pressed_flags: i32,
     pub touch_down: bool,
     pub touch: Option<(u16, u16)>,
+}
+
+#[derive(Clone, Copy)]
+pub struct AudioMeasurements {
+    pub buffer_bytes: u32,
+    pub volume: u32,
+    pub volume_ok: bool,
+    pub call: &'static str,
+    pub ok: bool,
+    pub handle: u32,
+    pub streaming: bool,
+    pub state: u32,
+    pub position_ms: u32,
+    pub bytes: u32,
+    pub status_ok: bool,
+    pub events: u32,
+    pub last_kind: u16,
+    pub last_param: u16,
+    pub last_data: [i32; 2],
+    pub submitted: [u32; 2],
+    pub staging: [u32; 2],
+    pub cursors: [u32; 2],
+}
+
+impl Default for AudioMeasurements {
+    fn default() -> Self {
+        Self {
+            buffer_bytes: 4096,
+            volume: 0,
+            volume_ok: true,
+            call: "IDLE",
+            ok: true,
+            handle: 0,
+            streaming: false,
+            state: 0,
+            position_ms: 0,
+            bytes: 0,
+            status_ok: false,
+            events: 0,
+            last_kind: 0,
+            last_param: 0,
+            last_data: [0; 2],
+            submitted: [0; 2],
+            staging: [0; 2],
+            cursors: [0; 2],
+        }
+    }
 }
 
 pub struct Canvas<'a> {
@@ -92,6 +140,71 @@ pub fn render(pixels: &mut [u16], m: &Measurements, edge: usize, input: &Input) 
         color: 0xffff,
         scale: 2,
     };
+    if input.mode == Mode::Audio {
+        c.pixels.fill(0);
+        let a = &m.audio;
+        c.at(28, 20, 0xffff);
+        write!(c, "AUDIO TEST   11025HZ 16BIT STEREO").unwrap();
+        c.at(28, 54, 0xffe0);
+        write!(c, "Q  PLAY ONCE    W  STREAM    P  STOP").unwrap();
+        c.at(28, 86, 0xffff);
+        write!(
+            c,
+            "MODE {}  CALL {}  {}",
+            if a.streaming { "STREAM" } else { "ONCE" },
+            a.call,
+            if a.ok { "OK" } else { "FAIL" }
+        )
+        .unwrap();
+        c.at(28, 118, 0xffff);
+        write!(
+            c,
+            "HANDLE {:08X}  STATUS {}",
+            a.handle,
+            if a.status_ok { "OK" } else { "--" }
+        )
+        .unwrap();
+        c.at(28, 150, 0xffff);
+        write!(
+            c,
+            "STATE {}  MS {}  BYTE {}",
+            a.state, a.position_ms, a.bytes
+        )
+        .unwrap();
+        c.at(28, 182, 0xffff);
+        write!(
+            c,
+            "EVENTS {}  TYPE {:04X} PARAM {:04X}",
+            a.events, a.last_kind, a.last_param
+        )
+        .unwrap();
+        c.at(28, 214, 0xffff);
+        write!(c, "DATA {:08X} {:08X}", a.last_data[0], a.last_data[1]).unwrap();
+        c.at(28, 246, 0xffff);
+        write!(c, "SUBMIT 0={} 1={}", a.submitted[0], a.submitted[1]).unwrap();
+        c.at(28, 278, 0xffff);
+        write!(c, "STAGING {} {}", a.staging[0], a.staging[1]).unwrap();
+        c.at(28, 310, 0xffff);
+        write!(c, "CURSOR {} {}", a.cursors[0], a.cursors[1]).unwrap();
+        c.at(28, 338, 0xffe0);
+        write!(
+            c,
+            "LEFT/RIGHT BUFFER {} B  {} MS",
+            a.buffer_bytes,
+            a.buffer_bytes * 1000 / (11025 * 4)
+        )
+        .unwrap();
+        c.at(28, 370, 0xffff);
+        write!(
+            c,
+            "PAGEUP/DOWN VOLUME {} / 9  {}",
+            a.volume,
+            if a.volume_ok { "OK" } else { "FAIL" }
+        )
+        .unwrap();
+        status(&mut c, input);
+        return;
+    }
     for x in 0..WIDTH {
         for y in 0..HEIGHT {
             if x % 50 == 0 || y % 50 == 0 {
@@ -257,6 +370,7 @@ fn status(c: &mut Canvas<'_>, input: &Input) {
         Mode::Touch => "TOUCH",
         Mode::Pixels => "PIXELS",
         Mode::Settings => "SETTINGS",
+        Mode::Audio => "AUDIO",
     };
     c.at(28, top + 2, 0xffe0);
     write!(
@@ -268,7 +382,7 @@ fn status(c: &mut Canvas<'_>, input: &Input) {
     c.at(28, top + 22, 0xffff);
     write!(c, "HOME:TEXT JP:KEYS EN:TOUCH MY:PIXELS").unwrap();
     c.at(28, top + 40, 0xffff);
-    write!(c, "HISTORY:SETTINGS ESC:EXIT UNLOCKED").unwrap();
+    write!(c, "HISTORY:AUDIO LIST:SETTINGS ESC:EXIT").unwrap();
 }
 
 fn glyph(c: u8) -> [u8; 7] {

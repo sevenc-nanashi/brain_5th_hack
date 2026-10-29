@@ -13,4 +13,11 @@ pub mod peg;
     target_arch = "arm",
     target_os = "none"
 ))]
+pub mod audio;
+
+#[cfg(all(
+    feature = "experimental-runtime",
+    target_arch = "arm",
+    target_os = "none"
+))]
 pub mod runtime;

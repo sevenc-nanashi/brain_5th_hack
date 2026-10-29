@@ -2,9 +2,10 @@
 #![no_main]
 use brain_inspector::{
     Measurements,
-    input::{Input, KeyEvent},
+    input::{Input, KeyEvent, Mode},
     render,
 };
+mod audio;
 use core::{arch::global_asm, ffi::c_void, panic::PanicInfo, ptr};
 use reflex::{
     app::{self, AppContext},
@@ -31,6 +32,7 @@ static mut BASE_MESSAGE: Option<peg::MessageFn> = None;
 static mut MEASUREMENTS: Option<Measurements> = None;
 static mut READY: bool = false;
 static mut INPUT: Option<Input> = None;
+static mut AUDIO_KEYS: u8 = 0;
 
 unsafe fn rectangle(object: *mut c_void, offset: usize) -> [i16; 4] {
     unsafe { object.cast::<u8>().add(offset).cast::<[i16; 4]>().read() }
@@ -88,6 +90,16 @@ unsafe extern "C" fn inspector_main(context: *const AppContext) {
 }
 unsafe fn close() {
     unsafe {
+        let mut m = MEASUREMENTS.unwrap();
+        let stopped = audio::stop(&mut m.audio);
+        MEASUREMENTS = Some(m);
+        if !stopped {
+            let mut input = INPUT.unwrap();
+            input.mode = Mode::Audio;
+            INPUT = Some(input);
+            present(WINDOW, WINDOW.cast::<u8>().add(0x0c).cast());
+            return;
+        }
         READY = false;
         raw::kill_timer(WINDOW, TIMER);
         raw::set_current(CONTEXT.presentation, FOCUS);
@@ -101,6 +113,14 @@ unsafe extern "C" fn message(window: *mut c_void, message: *const peg::Message) 
         let msg = &*message;
         if !READY {
             return BASE_MESSAGE.unwrap()(window, message);
+        }
+        if msg.kind >= 0x100 && INPUT.unwrap().mode == Mode::Audio {
+            let mut m = MEASUREMENTS.unwrap();
+            audio::event(msg, &mut m.audio);
+            MEASUREMENTS = Some(m);
+            if msg.kind == reflex::audio::PM_AUDIO {
+                return 0;
+            }
         }
         match msg.kind {
             peg::PM_DESTROY => {
@@ -133,6 +153,7 @@ unsafe extern "C" fn message(window: *mut c_void, message: *const peg::Message) 
                 }
                 MEASUREMENTS = Some(m);
                 let mut input = INPUT.unwrap();
+                let previous_mode = input.mode;
                 let consumed = input.key(
                     KeyEvent {
                         key: msg.param,
@@ -141,6 +162,42 @@ unsafe extern "C" fn message(window: *mut c_void, message: *const peg::Message) 
                     },
                     runtime::micros(),
                 );
+                if previous_mode == Mode::Audio
+                    && input.mode != Mode::Audio
+                    && !audio::stop(&mut m.audio)
+                {
+                    input.mode = Mode::Audio;
+                }
+                let audio_bit = match msg.param {
+                    0x51 | 0x71 => 1, // Q/q: single tone
+                    0x57 | 0x77 => 2, // W/w: stream
+                    0x50 | 0x70 => 4, // P/p: stop
+                    peg::key::PAGE_UP => 8,
+                    peg::key::PAGE_DOWN => 16,
+                    peg::key::LEFT => 32,
+                    peg::key::RIGHT => 64,
+                    _ => 0,
+                };
+                let audio_control = input.mode == Mode::Audio && audio_bit != 0;
+                if audio_control {
+                    if msg.kind == peg::PM_KEY_UP {
+                        AUDIO_KEYS &= !audio_bit;
+                    } else if AUDIO_KEYS & audio_bit == 0 {
+                        AUDIO_KEYS |= audio_bit;
+                        if audio_bit == 4 {
+                            audio::stop(&mut m.audio);
+                        } else if audio_bit >= 32 && !input.locked {
+                            audio::change_buffer(audio_bit == 64, &mut m.audio);
+                        } else if audio_bit >= 8 && !input.locked {
+                            audio::change_volume(audio_bit == 8, &mut m.audio);
+                        } else if !input.locked {
+                            audio::play(window, audio_bit == 2, &mut m.audio);
+                        }
+                    }
+                } else if msg.kind == peg::PM_KEY_UP {
+                    AUDIO_KEYS &= !audio_bit;
+                }
+                MEASUREMENTS = Some(m);
                 INPUT = Some(input);
                 if msg.kind != peg::PM_KEY_UP && msg.param == peg::key::ESCAPE && !input.locked {
                     close();
@@ -148,6 +205,7 @@ unsafe extern "C" fn message(window: *mut c_void, message: *const peg::Message) 
                 }
                 present(window, window.cast::<u8>().add(0x0c).cast());
                 if consumed
+                    || audio_control
                     || matches!(
                         msg.param,
                         peg::key::LEFT
@@ -175,6 +233,9 @@ unsafe extern "C" fn message(window: *mut c_void, message: *const peg::Message) 
                 }
             }
             peg::PM_TIMER if msg.param == TIMER as u16 => {
+                let mut m = MEASUREMENTS.unwrap();
+                audio::poll(&mut m.audio);
+                MEASUREMENTS = Some(m);
                 sample();
                 present(window, window.cast::<u8>().add(0x0c).cast());
                 return 0;

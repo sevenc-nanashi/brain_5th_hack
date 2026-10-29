@@ -11,6 +11,7 @@ pub enum Mode {
     Touch,
     Pixels,
     Settings,
+    Audio,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -75,7 +76,8 @@ impl Input {
             key::JAPANESE_DICTIONARY => Some(Mode::Keys),
             key::ENGLISH_DICTIONARY => Some(Mode::Touch),
             key::MY_DICTIONARY => Some(Mode::Pixels),
-            key::HISTORY => Some(Mode::Settings),
+            key::HISTORY => Some(Mode::Audio),
+            key::SELECT_FROM_LIST => Some(Mode::Settings),
             _ => None,
         };
         if let Some(mode) = mode {

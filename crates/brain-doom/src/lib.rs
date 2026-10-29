@@ -20,10 +20,10 @@ pub fn doom_key(code: u16) -> Option<i32> {
 }
 
 /// Scale 320×200 RGB to 640×480 RGB565, correcting Doom's pixel aspect ratio.
-/// The image is centered with black sidebars in the PW-H1's 854×480 display.
+/// Center within the PW-H1's observed 800px usable width, excluding the host UI.
 pub fn paint(rgb: &[u8], mut pixel: impl FnMut(usize, usize, u16)) {
     assert_eq!(rgb.len(), DOOM_WIDTH * DOOM_HEIGHT * 3);
-    let left = (reflex::display::WIDTH - 640) / 2;
+    let left = (800 - 640) / 2;
     for y in 0..480 {
         let source_y = y * DOOM_HEIGHT / 480;
         for x in 0..reflex::display::WIDTH {

@@ -28,6 +28,8 @@ unsafe extern "C" {
     fn brain_doom_step() -> i32;
     fn brain_doom_frame() -> *const u8;
     fn brain_doom_key(code: i32, pressed: i32);
+    fn brain_doom_mix() -> i32;
+    fn brain_doom_sound() -> *const i16;
 }
 
 #[cfg(not(target_os = "none"))]
@@ -47,6 +49,17 @@ pub unsafe extern "C" fn init() -> i32 {
 /// Requires successful initialization and exclusive engine access. Zero means running.
 pub unsafe extern "C" fn step() -> i32 {
     unsafe { brain_doom_step() }
+}
+/// Mix 512 stereo frames at 11025 Hz; advance according to audio consumption.
+/// # Safety
+/// Requires initialized engine and exclusive access, on the engine stack.
+pub unsafe extern "C" fn mix() -> i32 {
+    unsafe { brain_doom_mix() }
+}
+/// # Safety
+/// Requires a successful mix, with no engine calls until the slice is released.
+pub unsafe fn sound<'a>() -> &'a [i16] {
+    unsafe { core::slice::from_raw_parts(brain_doom_sound(), 512 * 2) }
 }
 /// # Safety
 /// Serialize with all engine calls. Use elapsed microseconds, not CPU iterations.

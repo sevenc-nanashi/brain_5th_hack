@@ -64,6 +64,7 @@ V690_H1 に含まれる 14 個の AppMain で確認済み。未知の起動処�
 描画・アプリ終了と、キー／タッチ／タイマーを含む PEG の ABI 定義をまとめる。
 PEG の関数呼び出しは V690_H1 未照合のため `experimental-peg` feature が必要。
 使い方と確認状況は [Reflex の README](crates/reflex/README.md) を参照。
+音声 API の静的解析結果と未確定事項は [docs/audio.md](docs/audio.md) を参照。
 
 ## brain-hello-world
 

@@ -9,6 +9,8 @@ use reflex::{
     runtime,
 };
 
+mod audio;
+
 // Copy .data to PCConnect's RAM base and clear .bss before entering Rust/C.
 global_asm!(include_str!("startup.S"), options(raw));
 
@@ -85,6 +87,12 @@ unsafe extern "C" fn doom_main(context: *const AppContext) {
 
 unsafe fn close() {
     unsafe {
+        // Keep the image and PCM buffers alive if the driver has not stopped.
+        if !audio::shutdown() {
+            FAILED = true;
+            failure_screen();
+            return;
+        }
         READY = false;
         raw::kill_timer(WINDOW, TIMER);
         raw::set_current(CONTEXT.presentation, PREVIOUS_FOCUS);
@@ -109,6 +117,10 @@ unsafe extern "C" fn message(window: *mut c_void, message: *const peg::Message) 
                 return 0;
             }
             peg::PM_KEY | peg::PM_KEY_DOWN | peg::PM_KEY_UP => {
+                if matches!(msg.param, peg::key::PAGE_UP | peg::key::PAGE_DOWN) {
+                    // Let the host handle Shift+PageUp/PageDown and its shared volume.
+                    return BASE_MESSAGE.unwrap()(window, message);
+                }
                 let pressed = msg.kind != peg::PM_KEY_UP;
                 // Q exits the app immediately; Escape remains Doom's menu key.
                 if pressed
@@ -127,6 +139,17 @@ unsafe extern "C" fn message(window: *mut c_void, message: *const peg::Message) 
                 }
                 return 0;
             }
+            reflex::audio::PM_AUDIO => {
+                if !FAILED
+                    && msg.param == reflex::audio::BUFFER_CONSUMED
+                    && !audio::refill(msg.data.ext_params[0])
+                {
+                    FAILED = true;
+                    audio::shutdown();
+                    failure_screen();
+                }
+                return 0;
+            }
             peg::PM_TIMER if msg.param == TIMER as u16 => {
                 if FAILED {
                     return 0;
@@ -142,6 +165,11 @@ unsafe extern "C" fn message(window: *mut c_void, message: *const peg::Message) 
                 } else {
                     STARTED = true;
                     let result = run(engine::init);
+                    let result = if result == 0 && !audio::init(window) {
+                        -1
+                    } else {
+                        result
+                    };
                     // Loading is not game time; avoid simulating the entire startup delay.
                     START_US = runtime::micros();
                     LAST_FRAME_US = 0;
@@ -153,6 +181,7 @@ unsafe extern "C" fn message(window: *mut c_void, message: *const peg::Message) 
                 }
                 if result != 0 {
                     FAILED = true;
+                    audio::shutdown();
                     failure_screen();
                     return 0;
                 }

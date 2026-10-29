@@ -20,9 +20,11 @@ reflex = { path = "../reflex" }
 | `display` | 854×480 RGB565、回転座標、ピクセル書き込み、キャッシュ同期、表示更新 | 既存 Hello World の処理を移植、実機確認が必要 |
 | `peg` | キー・タッチ・タイマーのメッセージ、描画用 ABI 型・vtable スロット | Brain Hackers の公開サンプルに基づく、V690_H1 未照合 |
 | `runtime` | malloc / free、TSTMR 時刻 | `experimental-runtime` が必要。malloc/free の公開入口を V690_H1 で確認 |
+| `audio` | PCM 再生、消費通知、補充、停止・状態取得 | `experimental-runtime` が必要。V690_H1 静的解析に基づく、実機未確認 |
 | `peg::raw` | ウィンドウ生成、画面矩形、描画、フォーカス、タイマー、破棄の関数ポインタ | `experimental-peg` が必要。一部を純正アプリの公開入口へ照合済み、実機未確認 |
 
 デバイスを操作する API は `arm` + `target_os = "none"` でのみ公開する。
+音声 ABI と内部バッファ長の変更に関する制約は [音声解析メモ](../../docs/audio.md) を参照。
 型・定数・座標変換はホストでも使える。ポインターを含む ABI 型の配置は
 32-bit ARM 用であり、64-bit ホストのメモリをそのままデバイスへ送ってはいけない。
 
