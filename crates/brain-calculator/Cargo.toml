@@ -13,3 +13,10 @@ libm = "0.2.16"
 [[bin]]
 name = "brain-calculator"
 required-features = ["device"]
+
+[package.metadata.reflex]
+name = "Calculator"
+output = "calculator"
+linker = "../reflex/link.x"
+link-args = ["--no-undefined"]
+assets = ["../reflex/assets/FONT-LICENSE.txt"]

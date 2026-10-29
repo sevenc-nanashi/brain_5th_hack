@@ -18,3 +18,14 @@ required-features = ["device"]
 [[example]]
 name = "preview"
 required-features = ["engine"]
+
+[package.metadata.reflex]
+name = "Doom"
+output = "doom"
+linker = "link.x"
+assets = ["assets/FONT-LICENSE.txt"]
+
+[package.metadata.reflex.inputs]
+directory = "doom-inputs"
+env = "DOOM_INPUTS"
+assets = ["OPAL-LICENSE.txt"]

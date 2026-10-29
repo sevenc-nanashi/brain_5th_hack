@@ -1,50 +1,17 @@
 CARGO ?= cargo
 OBJCOPY ?= llvm-objcopy-20
 BUILD_DIR ?= target
-HELLO_DIR = $(BUILD_DIR)/hello-world/APP/HelloWorld
+REFLEX = $(CARGO) run --quiet -p reflex-cli -- --target-dir "$(BUILD_DIR)" --objcopy "$(OBJCOPY)"
 
-.PHONY: hello-world
-hello-world:
-	$(CARGO) rustc -p brain-hello-world --bin brain-hello-world --features device --release --target armv7a-none-eabi --target-dir $(BUILD_DIR) -- -C panic=abort -C target-cpu=cortex-a7 -C relocation-model=static -C link-arg=-Tcrates/brain-hello-world/link.x
-	mkdir -p $(HELLO_DIR)
-	$(OBJCOPY) -O binary $(BUILD_DIR)/armv7a-none-eabi/release/brain-hello-world $(HELLO_DIR)/AppMain.bin
-	touch $(HELLO_DIR)/index.din
+.PHONY: hello-world doom inspector calculator doom-fetch doom-preview calculator-preview
+hello-world doom inspector calculator:
+	$(REFLEX) build $@
 
-DOOM_DIR = $(BUILD_DIR)/doom/APP/Doom
-
-.PHONY: doom-fetch doom doom-preview
 doom-fetch:
-	ruby scripts/fetch-doom.rb $(BUILD_DIR)/doom-inputs
-
-doom:
-	DOOM_INPUTS=$(abspath $(BUILD_DIR)/doom-inputs) $(CARGO) rustc -p brain-doom --bin brain-doom --features device --release --target armv7a-none-eabi --target-dir $(BUILD_DIR) -- -C panic=abort -C target-cpu=cortex-a7 -C relocation-model=static -C link-arg=-Tcrates/brain-doom/link.x
-	mkdir -p $(DOOM_DIR)
-	$(OBJCOPY) -O binary $(BUILD_DIR)/armv7a-none-eabi/release/brain-doom $(DOOM_DIR)/AppMain.bin
-	touch $(DOOM_DIR)/index.din
-	cp $(BUILD_DIR)/doom-inputs/OPAL-LICENSE.txt $(DOOM_DIR)/OPAL-LICENSE.txt
-	cp crates/brain-doom/assets/FONT-LICENSE.txt $(DOOM_DIR)/FONT-LICENSE.txt
+	ruby scripts/fetch-doom.rb "$(BUILD_DIR)/doom-inputs"
 
 doom-preview:
 	DOOM_INPUTS=$(abspath $(BUILD_DIR)/doom-inputs) $(CARGO) run -p brain-doom --example preview --features engine --release --target-dir $(BUILD_DIR) -- $(BUILD_DIR)/doom-preview.ppm
-
-INSPECTOR_DIR = $(BUILD_DIR)/inspector/APP/Inspector
-
-.PHONY: inspector
-inspector:
-	$(CARGO) rustc -p brain-inspector --bin brain-inspector --features device --release --target armv7a-none-eabi --target-dir $(BUILD_DIR) -- -C panic=abort -C target-cpu=cortex-a7 -C relocation-model=static -C link-arg=-Tcrates/brain-inspector/link.x
-	mkdir -p $(INSPECTOR_DIR)
-	$(OBJCOPY) -O binary $(BUILD_DIR)/armv7a-none-eabi/release/brain-inspector $(INSPECTOR_DIR)/AppMain.bin
-	touch $(INSPECTOR_DIR)/index.din
-
-CALCULATOR_DIR = $(BUILD_DIR)/calculator/APP/Calculator
-
-.PHONY: calculator calculator-preview
-calculator:
-	$(CARGO) rustc -p brain-calculator --bin brain-calculator --features device --release --target armv7a-none-eabi --target-dir $(BUILD_DIR) -- -C panic=abort -C target-cpu=cortex-a7 -C relocation-model=static -C link-arg=-Tcrates/reflex/link.x -C link-arg=--no-undefined
-	mkdir -p $(CALCULATOR_DIR)
-	$(OBJCOPY) -O binary $(BUILD_DIR)/armv7a-none-eabi/release/brain-calculator $(CALCULATOR_DIR)/AppMain.bin
-	touch $(CALCULATOR_DIR)/index.din
-	cp crates/reflex/assets/FONT-LICENSE.txt $(CALCULATOR_DIR)/FONT-LICENSE.txt
 
 calculator-preview:
 	$(CARGO) run -p brain-calculator --example preview --target-dir $(BUILD_DIR) -- $(BUILD_DIR)/calculator-preview

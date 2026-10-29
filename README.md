@@ -66,6 +66,22 @@ PEG の関数呼び出しは V690_H1 未照合のため `experimental-peg` featu
 使い方と確認状況は [Reflex の README](crates/reflex/README.md) を参照。
 音声 API の静的解析結果と未確定事項は [docs/audio.md](docs/audio.md) を参照。
 
+## reflex CLI
+
+Makefileで行っていたビルドとSDカードへの配置をUsageベースのCLIで実行できる。取得・プレビューはMakefileに残している。
+
+```sh
+cargo install --path crates/reflex-cli --locked
+reflex build inspector
+make doom-fetch
+reflex build doom
+reflex deploy inspector I:/  # WSLからWindowsのドライブへ配置
+```
+
+`deploy <package> <path>` はビルド後、指定先の `APP/<アプリ名>` に配置する。
+通常のLinuxディレクトリも指定できる。WSLのWindowsパスは `wslpath` と `powershell.exe` で扱い、特定のマウント先を前提にしない。
+詳しい設定と使い方は [CLIのREADME](crates/reflex-cli/README.md) を参照。
+
 ## brain-calculator
 
 `alloc`・`#[reflex::main]`・QR付きpanic画面を使う関数電卓。

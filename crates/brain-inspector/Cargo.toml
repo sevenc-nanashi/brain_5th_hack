@@ -12,3 +12,8 @@ reflex = { path = "../reflex" }
 [[bin]]
 name = "brain-inspector"
 required-features = ["device"]
+
+[package.metadata.reflex]
+name = "Inspector"
+output = "inspector"
+linker = "link.x"
