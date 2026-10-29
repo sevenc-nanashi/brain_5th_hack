@@ -87,6 +87,25 @@ LLVM の `llvm-objcopy-20` が必要。別の名前でインストールされ�
 
 起動・描画の根拠とバイナリの確認方法は [docs/hello-world.md](docs/hello-world.md) を参照。
 
+## brain-doom
+
+Reflex を使う Doom の試作。指定の DOOM1.WAD を埋め込んだ追加アプリを生成する。
+PC 上のゲーム開始・操作・終了は確認済み、PW-H1 実機動作は未確認。
+
+```sh
+make doom-fetch
+make doom
+```
+
+`target/doom/APP/Doom/` を SD の `APP/Doom/` へコピーする。
+操作・制限・検証手順は [docs/doom.md](docs/doom.md) を参照。
+
+## brain-inspector
+
+画面領域・キーの生コード・タッチ座標を確認する独立した計測アプリ。
+`make inspector` で生成し、`target/inspector/APP/Inspector/` を SD の `APP/` へコピーする。
+操作と各数値の意味は [docs/inspector.md](docs/inspector.md) を参照。
+
 ## 開発
 
 ```sh

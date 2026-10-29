@@ -4,12 +4,16 @@
 //! remain valid; `PM_KEY_UP` is tentative even in the upstream source.
 use core::ffi::c_void;
 
+pub const PM_DESTROY: u16 = 6;
 pub const PM_KEY: u16 = 9;
 pub const PM_LBUTTONDOWN: u16 = 10;
 pub const PM_LBUTTONUP: u16 = 11;
 pub const PM_TIMER: u16 = 32;
 pub const PM_KEY_DOWN: u16 = 33;
 pub const PM_KEY_UP: u16 = 34;
+/// PW-H1 touch drag: PM_KEY with this param; data.point is X/Y (16 bits each).
+pub const TOUCH_MOVE_PARAM: u16 = 0x8000;
+/// PW-H1 observation: key flags change from 0x800 to 0x840 with Shift active.
 pub const KMOD_SHIFT: u32 = 0x40;
 pub const KFLAG_PRESS: u32 = 0x800;
 pub const KFLAG_HELD: u32 = 0xc00;
@@ -19,11 +23,32 @@ pub mod key {
     pub const ESCAPE: u16 = 0x1b;
     pub const BACKSPACE: u16 = 0x08;
     pub const SPACE: u16 = 0x20;
-    pub const LEFT: u16 = 0x25e;
+    /// 二重上。Shift 有効時は音量プラス。
+    pub const PAGE_UP: u16 = 0x25c;
+    /// 二重下。Shift 有効時は音量マイナス。
+    pub const PAGE_DOWN: u16 = 0x25d;
+    // PW-H1 device observation: up/left differ from event_dumper's labels.
+    pub const LEFT: u16 = 0x260;
     pub const DOWN: u16 = 0x25f;
-    pub const UP: u16 = 0x260;
+    pub const UP: u16 = 0x25e;
     pub const RIGHT: u16 = 0x261;
     pub const SHIFT: u16 = 0x265;
+    /// ホーム。
+    pub const HOME: u16 = 0x28a;
+    /// 国語/漢字。
+    pub const JAPANESE_DICTIONARY: u16 = 0x28b;
+    /// 英和/和英。
+    pub const ENGLISH_DICTIONARY: u16 = 0x28c;
+    /// My辞書。
+    pub const MY_DICTIONARY: u16 = 0x28d;
+    /// 履歴。
+    pub const HISTORY: u16 = 0x28e;
+    /// 一覧から選ぶ。
+    pub const SELECT_FROM_LIST: u16 = 0x28f;
+    /// 音声。
+    pub const AUDIO: u16 = 0x294;
+    /// あA1/記号。
+    pub const INPUT_MODE: u16 = 0x295;
 }
 
 #[repr(C)]
@@ -105,7 +130,7 @@ const _: () = {
 /// in the PEG event context; objects, callbacks and buffers must outlive their
 /// registration/use. Destroy windows and stop timers before releasing storage.
 /// Timer count/reset values are PEG ticks, not milliseconds.
-// shortcut: addresses come from x1ram, verify V690_H1 before adding safe wrappers.
+// shortcut: window/message ABI still needs device validation before adding safe wrappers.
 #[cfg(all(feature = "experimental-peg", target_arch = "arm", target_os = "none"))]
 pub mod raw {
     use super::*;
@@ -171,31 +196,54 @@ pub mod raw {
             call()
         }
     }
+    /// Blit through PEG's backing store and flush its drawing transaction.
+    ///
+    /// # Safety
+    /// Requires a live window, its invalid rectangle, and a bitmap whose pixel
+    /// storage remains valid during the call. Call from the PEG event thread.
+    pub unsafe fn blit(window: *mut c_void, invalid: *const Rect, bitmap: *mut Bitmap) {
+        unsafe {
+            win_begin_draw(window, invalid);
+            let screen = get_screen();
+            let vtable = *screen.cast::<*const usize>();
+            let draw: BitmapFn = core::mem::transmute(*vtable.add(SCR_VF_BITMAP));
+            let end: EndDrawFn = core::mem::transmute(*vtable.add(SCR_VF_ENDDRAW));
+            draw(screen, 0, bitmap);
+            end(screen);
+        }
+    }
     /// # Safety
     /// The address, object lifetime and event-context requirements in [`self`] apply.
     pub unsafe fn set_current(presentation: *mut c_void, target: *mut c_void) {
         unsafe {
-            let call: unsafe extern "C" fn(*mut c_void, *mut c_void) =
-                core::mem::transmute(0x6003_13c8usize);
-            call(presentation, target)
+            // PCConnect/AppMain.bin 0x1564c: inline current-window setter.
+            presentation
+                .cast::<u8>()
+                .add(0x18c)
+                .cast::<*mut c_void>()
+                .write(target);
         }
     }
     /// # Safety
     /// The address, object lifetime and event-context requirements in [`self`] apply.
     pub unsafe fn set_timer(who: *mut c_void, id: u32, count: u32, reset: u32) {
         unsafe {
-            let call: unsafe extern "C" fn(*mut c_void, u32, u32, u32) =
-                core::mem::transmute(0x6004_70a0usize);
-            call(who, id, count, reset)
+            let timers: unsafe extern "C" fn() -> *mut c_void =
+                core::mem::transmute(0x6000_413cusize);
+            let call: unsafe extern "C" fn(*mut c_void, *mut c_void, u32, u32, u32) =
+                core::mem::transmute(0x6000_5d04usize);
+            call(timers(), who, id, count, reset);
         }
     }
     /// # Safety
     /// The address, object lifetime and event-context requirements in [`self`] apply.
     pub unsafe fn kill_timer(who: *mut c_void, id: u32) {
         unsafe {
-            let call: unsafe extern "C" fn(*mut c_void, u32) =
-                core::mem::transmute(0x6004_70d0usize);
-            call(who, id)
+            let timers: unsafe extern "C" fn() -> *mut c_void =
+                core::mem::transmute(0x6000_413cusize);
+            let call: unsafe extern "C" fn(*mut c_void, *mut c_void, u32, u32) =
+                core::mem::transmute(0x6000_5d08usize);
+            call(timers(), who, id, 0);
         }
     }
     /// # Safety
@@ -203,7 +251,7 @@ pub mod raw {
     pub unsafe fn destroy(source: *mut c_void, target: *mut c_void) {
         unsafe {
             let call: unsafe extern "C" fn(*mut c_void, *mut c_void) =
-                core::mem::transmute(0x6002_a3e4usize);
+                core::mem::transmute(0x6000_5c9cusize);
             call(source, target)
         }
     }

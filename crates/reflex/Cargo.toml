@@ -5,4 +5,5 @@ edition.workspace = true
 description = "Experimental no_std APIs for fifth-generation Sharp Brain apps"
 
 [features]
+experimental-runtime = []
 experimental-peg = []

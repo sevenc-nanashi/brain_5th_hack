@@ -1,0 +1,20 @@
+[package]
+name = "brain-doom"
+version = "0.1.0"
+edition.workspace = true
+
+[features]
+engine = ["reflex/experimental-runtime"]
+device = ["engine", "reflex/experimental-peg"]
+
+[dependencies]
+reflex = { path = "../reflex" }
+
+[[bin]]
+name = "brain-doom"
+path = "src/main.rs"
+required-features = ["device"]
+
+[[example]]
+name = "preview"
+required-features = ["engine"]

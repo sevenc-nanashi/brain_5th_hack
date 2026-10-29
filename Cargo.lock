@@ -68,7 +68,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "brain-doom"
+version = "0.1.0"
+dependencies = [
+ "reflex",
+]
+
+[[package]]
 name = "brain-hello-world"
+version = "0.1.0"
+dependencies = [
+ "reflex",
+]
+
+[[package]]
+name = "brain-inspector"
 version = "0.1.0"
 dependencies = [
  "reflex",
