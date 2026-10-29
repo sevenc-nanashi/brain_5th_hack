@@ -5,7 +5,7 @@ edition.workspace = true
 
 [features]
 engine = ["reflex/experimental-runtime"]
-device = ["engine", "reflex/experimental-peg"]
+device = ["engine", "reflex/application"]
 
 [dependencies]
 reflex = { path = "../reflex" }
@@ -22,7 +22,7 @@ required-features = ["engine"]
 [package.metadata.reflex]
 name = "Doom"
 output = "doom"
-linker = "link.x"
+linker = "../reflex/link.x"
 assets = ["assets/FONT-LICENSE.txt"]
 
 [package.metadata.reflex.inputs]

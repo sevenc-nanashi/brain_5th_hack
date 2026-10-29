@@ -356,6 +356,14 @@ pub fn render(pixels: &mut [u16], m: &Measurements, edge: usize, input: &Input) 
     .unwrap();
     c.at(28, 270, 0xffff);
     write!(c, "LEFT:OFF RIGHT:ON").unwrap();
+    c.at(28, 318, 0xffe0);
+    write!(c, "SHIFT P: PANIC TEST").unwrap();
+    if input.panic_confirm {
+        c.at(28, 350, 0xf800);
+        write!(c, "PANIC? Y:YES N:NO").unwrap();
+        c.at(28, 378, 0xffff);
+        write!(c, "RESTART REQUIRED").unwrap();
+    }
     status(&mut c, input);
 }
 

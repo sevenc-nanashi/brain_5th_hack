@@ -103,10 +103,8 @@ LLVM の `llvm-objcopy-20` が必要。別の名前でインストールされ�
 出力された `target/hello-world/APP/HelloWorld/` を SD カードの `APP/HelloWorld/` へコピーする。
 フォルダ内の `AppMain.bin` と空の `index.din` が必要。PC 上でビルドした ELF をコピーしない。
 
-追加アプリから起動すると、フレームバッファへ描画して有限回待機し、純正アプリと同じ SharpLib の入口へ終了を通知してから戻る。
-待機時間は CPU の速度に依存し、秒数は未校正。操作イベントは処理しない。
-戻った後のランチャーの描画復旧も未確認。固定 MMIO を使用するため、環境の違いによって
-画面が乱れたり停止したりする可能性がある。Windows CE 世代向けではない。
+`#[reflex::main]` と `Application` でPEGウィンドウへ描画し、約3秒後またはキー押下で終了する。
+ウィンドウの登録・再描画・フォーカス復元・終了通知はReflexに共通化している。移行後の実機動作は未確認。
 
 起動・描画の根拠とバイナリの確認方法は [docs/hello-world.md](docs/hello-world.md) を参照。
 

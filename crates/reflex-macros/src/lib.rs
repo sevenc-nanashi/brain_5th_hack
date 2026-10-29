@@ -9,13 +9,12 @@ pub fn main(args: TokenStream, item: TokenStream) -> TokenStream {
     if !args.is_empty()
         || !signature.inputs.is_empty()
         || signature.asyncness.is_some()
-        || matches!(signature.safety, syn::Safety::Unsafe(_))
         || signature.abi.is_some()
         || !signature.generics.params.is_empty()
         || signature.generics.where_clause.is_some()
         || signature.variadic.is_some()
     {
-        return syn::Error::new_spanned(signature, "expected a safe synchronous fn main() -> impl reflex::Application, without attribute arguments or generics")
+        return syn::Error::new_spanned(signature, "expected a synchronous fn main() -> impl reflex::Application (optionally unsafe), without attribute arguments or generics")
             .to_compile_error().into();
     }
     let name = &signature.ident;

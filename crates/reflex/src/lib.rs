@@ -26,7 +26,7 @@ pub mod runtime;
 pub use reflex_macros::main;
 
 pub mod application;
-pub use application::{Action, Application, Event, TouchPhase};
+pub use application::{Action, Application, Event, TouchPhase, Window};
 
 #[cfg(feature = "panic-screen")]
 pub mod panic_screen;

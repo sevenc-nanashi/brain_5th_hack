@@ -11,6 +11,7 @@ experimental-peg = []
 alloc = ["experimental-runtime"]
 application = ["alloc", "experimental-peg", "dep:reflex-macros"]
 text = []
+font-antialias = ["text"]
 panic-screen = ["text"]
 panic-qr = ["panic-screen", "dep:qrcodegen-no-heap"]
 

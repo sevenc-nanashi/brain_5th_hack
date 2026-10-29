@@ -30,9 +30,10 @@ static mut CLOSE_PENDING: bool = false;
 /// # Safety
 /// Called once by the ARM entry after data initialization, with the launcher's
 /// live context. The app must not register external callbacks that outlive Exit.
+/// The caller must also satisfy the safety requirements of `create`.
 pub unsafe fn start<A: Application>(
     context: *const AppContext,
-    create: fn() -> A,
+    create: unsafe fn() -> A,
     allocator: &'static SystemAllocator,
 ) {
     unsafe {
@@ -75,8 +76,12 @@ pub unsafe fn start<A: Application>(
             core::mem::transmute(*table.add(3));
         add(presentation, window, 1);
         raw::set_current(presentation, window);
+        let action = (*STATE).application.mounted(crate::Window {
+            raw: window,
+            presentation,
+        });
         BUSY = false;
-        if CLOSE_PENDING {
+        if CLOSE_PENDING || action == Action::Exit {
             close();
         } else {
             present(window.cast::<u8>().add(0x0c).cast());
@@ -91,6 +96,13 @@ unsafe fn close() {
         }
         CLOSING = true;
         BUSY = true;
+        CLOSE_PENDING = false;
+        if !(*STATE).application.can_exit() {
+            CLOSING = false;
+            BUSY = false;
+            present((*STATE).window.cast::<u8>().add(0x0c).cast());
+            return;
+        }
         let state = STATE;
         STATE = ptr::null_mut();
         let context = (*state).context;
@@ -149,16 +161,19 @@ unsafe extern "C" fn message(window: *mut c_void, message: *const peg::Message) 
             }
             _ => None,
         };
-        let Some(event) = event else {
-            return BASE_MESSAGE.unwrap()(window, message);
-        };
         BUSY = true;
-        let action = (*STATE).application.event(event);
+        let raw_action = (*STATE).application.raw_event(msg);
+        let action = raw_action.or_else(|| event.map(|event| (*STATE).application.event(event)));
         BUSY = false;
-        if CLOSE_PENDING || action == Action::Exit {
+        if CLOSE_PENDING || action == Some(Action::Exit) {
             close();
-        } else if action == Action::Redraw {
+        } else if matches!(action, Some(Action::Redraw | Action::RedrawAndBubble)) {
             present(window.cast::<u8>().add(0x0c).cast());
+            if action == Some(Action::RedrawAndBubble) && !CLOSING {
+                return BASE_MESSAGE.unwrap()(window, message);
+            }
+        } else if raw_action.is_some() {
+            return 0;
         } else {
             return BASE_MESSAGE.unwrap()(window, message);
         }
@@ -178,6 +193,7 @@ unsafe fn present(invalid: *const peg::Rect) {
         }
         BUSY = true;
         let state = STATE;
+        (*state).application.before_draw(invalid.read());
         // End Rust borrows before entering host drawing, which can reenter us.
         (*state).application.draw(&mut (*state).frame);
         let mut bitmap = peg::Bitmap {

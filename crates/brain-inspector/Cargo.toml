@@ -4,7 +4,7 @@ version = "0.1.0"
 edition.workspace = true
 
 [features]
-device = ["reflex/experimental-peg", "reflex/experimental-runtime"]
+device = ["reflex/application", "reflex/panic-qr"]
 
 [dependencies]
 reflex = { path = "../reflex" }
@@ -16,4 +16,5 @@ required-features = ["device"]
 [package.metadata.reflex]
 name = "Inspector"
 output = "inspector"
-linker = "link.x"
+linker = "../reflex/link.x"
+assets = ["../reflex/assets/FONT-LICENSE.txt"]

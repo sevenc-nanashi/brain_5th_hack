@@ -159,9 +159,11 @@ impl reflex::Application for Calculator {
 ```
 
 マクロは引数なしの同期関数へ付ける。戻り値は `Application + 'static`。
+`fn main()` と `unsafe fn main()` の両方を受け付ける。
+unsafe版は起動コードのunsafeブロックから呼ばれる。関数の安全条件が起動環境で満たされることはアプリ側で保証する。
 mainから戻ることは終了を意味しない。reflexが状態と描画バッファを所有して
 PEGへ戻り、キー・タッチを配送する。終了は `Action::Exit` を返す。
-`Action::None`と未知のPEGメッセージは元のウィンドウハンドラーへ渡す。
+`event`の `Action::None` と未知のPEGメッセージは元のウィンドウハンドラーへ渡す。
 `Event::Key`は生のキーコード・押下/解放・フラグを保持するため、
 PM_KEYとPM_KEY_DOWNの重複除去はアプリ側で行う。
 
@@ -169,6 +171,18 @@ PM_KEYとPM_KEY_DOWNの重複除去はアプリ側で行う。
 コードの先頭は `0x90000000`、RAM初期値は `0x90500000`。
 マクロはグローバルアロケーターとpanic handlerも定義するため、アプリ側で重複定義しない。
 実装例は [関数電卓](../brain-calculator/src/main.rs)、ビルド例は `make calculator`。
+
+Doom・Inspector・HelloWorldも同じ `#[reflex::main]` / `Application` を使う。
+必要に応じて次のフックを実装できる。呼び出しは同じPEGスレッドで直列化される。
+
+- `mounted(Window)`: ウィンドウ登録後に呼ぶ。`raw` と `presentation` を使い、タイマーや音声通知先を設定する。生APIの安全条件は引き続き呼び出し側で満たす。
+- `raw_event(&peg::Message)`: 型付き入力より先に呼ぶ。`None` なら通常の `event` 配送へ進み、`Some(Action::None)` なら描画せず消費する。タイマー・音声通知やInspectorの生キー種別の記録に使う。
+- `Action::RedrawAndBubble`: 描画後、元のメッセージをホストへ渡す。Inspectorのウィンドウクリップ用ジェスチャーを保つ。
+- `before_draw(Rect)`: ホストからの再描画も含め、描画直前に呼ぶ。Inspectorの矩形計測に使う。
+- `can_exit()`: Exit要求やホストの破棄通知で呼ぶ。音声停止・タイマー停止などを行い、成功時だけ `true` を返す。`false` ならアプリを解放せず再描画し、次の終了要求を待つ。
+
+終了を保留できるリソースの停止は `can_exit` で行い、その後の通常の所有値の解放はDropに任せる。
+フック内では生の `app::exit` を呼ばず、Reflexに終了を任せる。
 
 正常終了では、受付停止・フォーカス復元・元vtable復元・ウィンドウ破棄を行い、
 アプリ状態と描画バッファをdropしてから、Rustアロケーターに残る確保領域を一括解放する。
@@ -190,5 +204,19 @@ QRはVersion 10・誤り訂正M以下、固定バッファと4モジュールの
 ASCII以外の画面文字は `?` で表示し、QRにはUTF-8を保持する。
 画面保持、watchdog、実機でのQR読取、PEG破棄・再入は実機検証が必要。
 
-`text` featureのASCIIアトラスは既存DoomのDejaVu Sans Mono画像を再利用したもの。
+`text`（`panic-screen`・`panic-qr`を含む）の標準フォントは `ascii-6x13.bin`。
+ASCII 95文字を1行1バイトで保持し、サイズは **1,235バイト（約1.21KiB）**。
+各文字は `assets/ascii-6x13.glyphs` に手描きの5列パターンとして定義し、右端1列を字間にする。大文字は7行、小文字は5行を基本に、上昇部・下降部を個別に描いている。
+6×13ドットを2倍で表示し、既存の12×26セルと `scale` の意味を維持する。
+描画は前景色・背景色の選択だけで、濃淡のブレンド計算は行わない。
+
+`font-antialias` featureを有効にすると従来の `ascii.gray` に切り替わる。
+こちらは95×12×26の8bit濃淡データで **29,640バイト（約28.95KiB）**。
+どちらも静的な読み取り専用データとして埋め込み、ヒープへ展開しない。
+Cargoのfeatureは統合されるため、同じビルド内の依存先が `font-antialias` を有効にした場合も滑らかな版になる。
+
+標準フォントは `ruby scripts/reflex-bitmap-font.rb` で手描きパターンをそのままビット列へ変換する。画像処理・縮小・閾値処理は行わない。
+濃淡版だけがDejaVu Sans Mono由来で、再生成は
+`ruby scripts/doom-help-font.rb /path/to/DejaVuSansMono.ttf`。
+Doom独自のヘルプ用アトラスは、大文字小文字を読みやすく表示するため従来の濃淡版を維持する。
 アプリ配布時は `assets/FONT-LICENSE.txt` を同梱する。

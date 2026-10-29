@@ -225,7 +225,19 @@ fn deploy(source: &Path, destination: &Path, name: &str) -> Result<()> {
         ensure!(!source.is_empty(), "wslpath returned an empty path");
         let destination = destination.to_str().context("Windows path must be UTF-8")?;
         let script = format!(
-            "$ErrorActionPreference = 'Stop'; $src = {}; $root = {}; if (!(Test-Path -LiteralPath $root -PathType Container)) {{ throw 'Destination directory does not exist' }}; $dest = Join-Path (Join-Path $root 'APP') {}; [System.IO.Directory]::CreateDirectory($dest) | Out-Null; Get-ChildItem -LiteralPath $src -Force | ForEach-Object {{ Copy-Item -LiteralPath $_.FullName -Destination $dest -Recurse -Force }};",
+            r"
+            $ErrorActionPreference = 'Stop';
+            $src = {};
+            $root = {};
+            if (!(Test-Path -LiteralPath $root -PathType Container)) {{
+                throw 'Destination directory does not exist'
+            }}
+            $dest = Join-Path (Join-Path $root 'APP') {};
+            [System.IO.Directory]::CreateDirectory($dest) | Out-Null;
+            Get-ChildItem -LiteralPath $src -Force | ForEach-Object {{
+                Copy-Item -LiteralPath $_.FullName -Destination $dest -Recurse -Force
+            }}
+            ",
             ps_string(source),
             ps_string(destination),
             ps_string(name)

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition.workspace = true
 
 [features]
-device = []
+device = ["reflex/application"]
 
 [[bin]]
 name = "brain-hello-world"
@@ -17,4 +17,4 @@ reflex = { path = "../reflex" }
 [package.metadata.reflex]
 name = "HelloWorld"
 output = "hello-world"
-linker = "link.x"
+linker = "../reflex/link.x"

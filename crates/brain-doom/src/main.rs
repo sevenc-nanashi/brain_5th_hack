@@ -1,51 +1,42 @@
 #![no_std]
 #![no_main]
 use brain_doom::{doom_key, engine, help, paint};
-use core::{arch::global_asm, ffi::c_void, panic::PanicInfo, ptr};
+use core::{arch::global_asm, ffi::c_void, ptr};
 use reflex::{
-    app::{self, AppContext},
-    display,
+    Action, Application, Event, Window, display,
     peg::{self, raw},
     runtime,
 };
-
 mod audio;
-
-// Copy .data to PCConnect's RAM base and clear .bss before entering Rust/C.
-global_asm!(include_str!("startup.S"), options(raw));
-
+global_asm!(include_str!("engine-stack.S"), options(raw));
 const TIMER: u32 = 0x444f;
 #[repr(C, align(16))]
 struct Stack([u8; 128 * 1024]);
 static mut STACK: Stack = Stack([0; 128 * 1024]);
-static mut VTABLE: [usize; 80] = [0; 80];
-static mut ORIGINAL_VTABLE: *const usize = ptr::null();
-static mut WINDOW: *mut c_void = ptr::null_mut();
-static mut CONTEXT: AppContext = AppContext {
-    reserved: ptr::null(),
-    exec_path: ptr::null(),
-    presentation: ptr::null_mut(),
-    reserved2: ptr::null(),
-};
-static mut PREVIOUS_FOCUS: *mut c_void = ptr::null_mut();
-static mut BASE_MESSAGE: Option<peg::MessageFn> = None;
-static mut READY: bool = false;
-static mut STARTED: bool = false;
-static mut START_US: u64 = 0;
-static mut LAST_FRAME_US: u64 = 0;
-static mut FPS_STARTED_US: u64 = 0;
-static mut FPS_FRAMES: u32 = 0;
-static mut FPS: u32 = 0;
-static mut FAILED: bool = false;
-static mut HELP: bool = false;
-static mut HELP_STARTED_US: u64 = 0;
-static mut HELP_DRAW_US: u64 = 0;
-static mut AUDIO_RESET_HELD: bool = false;
-static mut AUDIO_RESET_DONE: bool = false;
-static mut FUNCTION_KEYS: [i32; 6] = [0; 6];
-static mut VOLUME_KEYS: u8 = 0;
-static mut FRAME: [u16; display::WIDTH * display::HEIGHT] = [0; display::WIDTH * display::HEIGHT];
 
+#[derive(Default)]
+struct Doom {
+    window: *mut c_void,
+    started: bool,
+    start_us: u64,
+    last_frame_us: u64,
+    fps_started_us: u64,
+    fps_frames: u32,
+    fps: u32,
+    failed: bool,
+    help: bool,
+    help_started_us: u64,
+    help_draw_us: u64,
+    audio_reset_held: bool,
+    audio_reset_done: bool,
+    function_keys: [i32; 6],
+    volume_keys: u8,
+    redraw: bool,
+}
+#[reflex::main]
+fn main() -> Doom {
+    Doom::default()
+}
 unsafe extern "C" {
     fn on_engine_stack(call: unsafe extern "C" fn() -> i32, top: *mut u8) -> i32;
 }
@@ -60,348 +51,295 @@ unsafe fn run(call: unsafe extern "C" fn() -> i32) -> i32 {
     }
 }
 
-#[unsafe(no_mangle)]
-unsafe extern "C" fn doom_main(context: *const AppContext) {
-    unsafe {
-        CONTEXT = context.read();
-        let window = runtime::alloc(0x108);
-        if window.is_null() {
-            app::exit(ptr::addr_of!(CONTEXT));
-            return;
-        }
-        ptr::write_bytes(window.cast::<u8>(), 0, 0x108);
-        raw::dec_window_ctor(window, 0x10);
-        raw::rect_set(window.cast::<u8>().add(0x0c).cast(), 0, 0, 853, 479);
-        raw::adjust_client(window);
-        ORIGINAL_VTABLE = *window.cast::<*const usize>();
-        ptr::copy_nonoverlapping(ORIGINAL_VTABLE, ptr::addr_of_mut!(VTABLE).cast(), 80);
-        BASE_MESSAGE = Some(core::mem::transmute::<usize, peg::MessageFn>(
-            *ORIGINAL_VTABLE.add(peg::VFUNC_MESSAGE),
-        ));
-        VTABLE[peg::VFUNC_MESSAGE] = message as *const () as usize;
-        VTABLE[peg::VFUNC_DRAW] = draw as *const () as usize;
-        *window.cast::<*const usize>() = ptr::addr_of!(VTABLE).cast();
-        WINDOW = window;
-        let pm = CONTEXT.presentation;
-        PREVIOUS_FOCUS = pm.cast::<u8>().add(0x18c).cast::<*mut c_void>().read();
-        let pm_vtable = *pm.cast::<*const usize>();
-        let add: unsafe extern "C" fn(*mut c_void, *mut c_void, i32) =
-            core::mem::transmute(*pm_vtable.add(3));
-        add(pm, window, 1);
-        raw::set_current(pm, window);
-        START_US = runtime::micros();
-        READY = true;
-        raw::set_timer(window, TIMER, 1, 1);
-    }
-}
-
-unsafe fn close() {
-    unsafe {
-        // Keep the image and PCM buffers alive if the driver has not stopped.
-        if !audio::shutdown() {
-            FAILED = true;
-            failure_screen();
-            return;
-        }
-        READY = false;
-        raw::kill_timer(WINDOW, TIMER);
-        raw::set_current(CONTEXT.presentation, PREVIOUS_FOCUS);
-        // Any queued destruction must dispatch through ROM, not our unloaded code.
-        *WINDOW.cast::<*const usize>() = ORIGINAL_VTABLE;
-        raw::destroy(WINDOW, WINDOW);
-        WINDOW = ptr::null_mut();
-        engine::shutdown();
-        app::exit(ptr::addr_of!(CONTEXT));
-    }
-}
-
-unsafe extern "C" fn message(window: *mut c_void, message: *const peg::Message) -> i32 {
-    unsafe {
-        let msg = &*message;
-        if !READY {
-            return BASE_MESSAGE.unwrap()(window, message);
-        }
-        match msg.kind {
-            peg::PM_DESTROY => {
-                close();
-                return 0;
-            }
-            peg::PM_KEY | peg::PM_KEY_DOWN | peg::PM_KEY_UP => {
-                if matches!(msg.param, peg::key::PAGE_UP | peg::key::PAGE_DOWN) {
-                    let bit = if msg.param == peg::key::PAGE_UP { 1 } else { 2 };
-                    if msg.kind == peg::PM_KEY_UP {
-                        VOLUME_KEYS &= !bit;
-                    } else if VOLUME_KEYS & bit == 0 {
-                        VOLUME_KEYS |= bit;
-                        let level = reflex::audio::volume();
-                        let next = if bit == 1 {
-                            (level + 1).min(9)
-                        } else {
-                            level.saturating_sub(1)
-                        };
-                        if !reflex::audio::set_volume(next) {
-                            FAILED = true;
-                            audio::shutdown();
-                            failure_screen();
-                        }
-                    }
-                    return 0;
-                }
-                let pressed = msg.kind != peg::PM_KEY_UP;
-                let reset_key = matches!(msg.param, 0x52 | 0x72);
-                if reset_key && !pressed {
-                    AUDIO_RESET_HELD = false;
-                }
-                if pressed
-                    && FAILED
-                    && (msg.param == b'q' as u16
-                        || msg.param == b'Q' as u16
-                        || matches!(
-                            msg.param,
-                            peg::key::HOME | peg::key::SELECT_FROM_LIST | peg::key::ESCAPE
-                        ))
-                {
-                    close();
-                    return 0;
-                }
-                if STARTED
-                    && !FAILED
-                    && (peg::key::HOME..=peg::key::SELECT_FROM_LIST).contains(&msg.param)
-                {
-                    let index = (msg.param - peg::key::HOME) as usize;
-                    if pressed {
-                        if FUNCTION_KEYS[index] == 0 {
-                            let shifted = msg.data.ext_params[0] as u32 & peg::KMOD_SHIFT != 0;
-                            let number = index + if shifted { 6 } else { 0 };
-                            let key = [
-                                0xbb, 0xbc, 0xbd, 0xbe, 0xbf, 0xc0, 0xc1, 0xc2, 0xc3, 0xc4, 0xd7,
-                                0xd8,
-                            ][number];
-                            FUNCTION_KEYS[index] = key;
-                            if number == 11 {
-                                toggle_help();
-                            } else if !HELP && !matches!(number, 1 | 2 | 5 | 8) {
-                                engine::key(key, true);
+impl Doom {
+    unsafe fn message(&mut self, msg: &peg::Message) -> Option<Action> {
+        unsafe {
+            let window = self.window;
+            match msg.kind {
+                peg::PM_KEY | peg::PM_KEY_DOWN | peg::PM_KEY_UP => {
+                    if matches!(msg.param, peg::key::PAGE_UP | peg::key::PAGE_DOWN) {
+                        let bit = if msg.param == peg::key::PAGE_UP { 1 } else { 2 };
+                        if msg.kind == peg::PM_KEY_UP {
+                            self.volume_keys &= !bit;
+                        } else if self.volume_keys & bit == 0 {
+                            self.volume_keys |= bit;
+                            let level = reflex::audio::volume();
+                            let next = if bit == 1 {
+                                (level + 1).min(9)
+                            } else {
+                                level.saturating_sub(1)
+                            };
+                            if !reflex::audio::set_volume(next) {
+                                self.failed = true;
+                                audio::shutdown();
+                                self.redraw = true;
                             }
                         }
-                    } else {
-                        let key = FUNCTION_KEYS[index];
-                        FUNCTION_KEYS[index] = 0;
-                        if key != 0 && key != 0xd8 {
-                            engine::key(key, false);
+                        return Some(Action::None);
+                    }
+                    let pressed = msg.kind != peg::PM_KEY_UP;
+                    let reset_key = matches!(msg.param, 0x52 | 0x72);
+                    if reset_key && !pressed {
+                        self.audio_reset_held = false;
+                    }
+                    if pressed
+                        && self.failed
+                        && (msg.param == b'q' as u16
+                            || msg.param == b'Q' as u16
+                            || matches!(
+                                msg.param,
+                                peg::key::HOME | peg::key::SELECT_FROM_LIST | peg::key::ESCAPE
+                            ))
+                    {
+                        return Some(Action::Exit);
+                    }
+                    if self.started
+                        && !self.failed
+                        && (peg::key::HOME..=peg::key::SELECT_FROM_LIST).contains(&msg.param)
+                    {
+                        let index = (msg.param - peg::key::HOME) as usize;
+                        if pressed {
+                            if self.function_keys[index] == 0 {
+                                let shifted = msg.data.ext_params[0] as u32 & peg::KMOD_SHIFT != 0;
+                                let number = index + if shifted { 6 } else { 0 };
+                                let key = [
+                                    0xbb, 0xbc, 0xbd, 0xbe, 0xbf, 0xc0, 0xc1, 0xc2, 0xc3, 0xc4,
+                                    0xd7, 0xd8,
+                                ][number];
+                                self.function_keys[index] = key;
+                                if number == 11 {
+                                    self.toggle_help();
+                                } else if !self.help && !matches!(number, 1 | 2 | 5 | 8) {
+                                    engine::key(key, true);
+                                }
+                            }
+                        } else {
+                            let key = self.function_keys[index];
+                            self.function_keys[index] = 0;
+                            if key != 0 && key != 0xd8 {
+                                engine::key(key, false);
+                            }
                         }
+                        return Some(Action::None);
                     }
-                    return 0;
-                }
-                if HELP && pressed {
-                    if matches!(msg.param, peg::key::BACKSPACE | peg::key::ESCAPE) {
-                        toggle_help();
-                    } else if reset_key && !AUDIO_RESET_HELD {
-                        AUDIO_RESET_HELD = true;
-                        if !audio::reset(window) {
-                            FAILED = true;
-                            audio::shutdown();
-                            failure_screen();
-                            return 0;
+                    if self.help && pressed {
+                        if matches!(msg.param, peg::key::BACKSPACE | peg::key::ESCAPE) {
+                            self.toggle_help();
+                        } else if reset_key && !self.audio_reset_held {
+                            self.audio_reset_held = true;
+                            if !audio::reset(window) {
+                                self.failed = true;
+                                audio::shutdown();
+                                self.redraw = true;
+                                return Some(Action::None);
+                            }
+                            self.audio_reset_done = true;
+                            self.redraw = true;
                         }
-                        AUDIO_RESET_DONE = true;
-                        render_frame();
-                        draw(window, window.cast::<u8>().add(0x0c).cast());
+                        return Some(Action::None);
                     }
-                    return 0;
-                }
-                if STARTED
-                    && !FAILED
-                    && let Some(key) = doom_key(msg.param)
-                {
-                    engine::key(key, pressed);
-                }
-                return 0;
-            }
-            reflex::audio::PM_AUDIO => {
-                if !FAILED
-                    && msg.param == reflex::audio::BUFFER_CONSUMED
-                    && !audio::refill(msg.data.ext_params[0])
-                {
-                    FAILED = true;
-                    audio::shutdown();
-                    failure_screen();
-                }
-                return 0;
-            }
-            peg::PM_TIMER if msg.param == TIMER as u16 => {
-                if FAILED {
-                    return 0;
-                }
-                if STARTED && !audio::maintain(window) {
-                    FAILED = true;
-                    audio::shutdown();
-                    failure_screen();
-                    return 0;
-                }
-                if HELP {
-                    let now = runtime::micros();
-                    if now.wrapping_sub(HELP_DRAW_US) >= 1_000_000 {
-                        HELP_DRAW_US = now;
-                        render_frame();
-                        draw(window, window.cast::<u8>().add(0x0c).cast());
+                    if self.started
+                        && !self.failed
+                        && let Some(key) = doom_key(msg.param)
+                    {
+                        engine::key(key, pressed);
                     }
-                    return 0;
+                    return Some(Action::None);
                 }
-                let elapsed = runtime::micros().wrapping_sub(START_US);
-                if STARTED && elapsed.wrapping_sub(LAST_FRAME_US) < 1_000_000 / 35 {
-                    return 0;
+                reflex::audio::PM_AUDIO => {
+                    if !self.failed
+                        && msg.param == reflex::audio::BUFFER_CONSUMED
+                        && !audio::refill(msg.data.ext_params[0])
+                    {
+                        self.failed = true;
+                        audio::shutdown();
+                        self.redraw = true;
+                    }
+                    return Some(Action::None);
                 }
-                engine::set_time(elapsed);
-                let result = if STARTED {
-                    LAST_FRAME_US = elapsed;
-                    run(engine::step)
-                } else {
-                    STARTED = true;
-                    let result = run(engine::init);
-                    let result = if result == 0 && !audio::init(window) {
-                        -1
+                peg::PM_TIMER if msg.param == TIMER as u16 => {
+                    if self.failed {
+                        return Some(Action::None);
+                    }
+                    if self.started && !audio::maintain(window) {
+                        self.failed = true;
+                        audio::shutdown();
+                        self.redraw = true;
+                        return Some(Action::None);
+                    }
+                    if self.help {
+                        let now = runtime::micros();
+                        if now.wrapping_sub(self.help_draw_us) >= 1_000_000 {
+                            self.help_draw_us = now;
+                            self.redraw = true;
+                        }
+                        return Some(Action::None);
+                    }
+                    let elapsed = runtime::micros().wrapping_sub(self.start_us);
+                    if self.started && elapsed.wrapping_sub(self.last_frame_us) < 1_000_000 / 35 {
+                        return Some(Action::None);
+                    }
+                    engine::set_time(elapsed);
+                    let result = if self.started {
+                        self.last_frame_us = elapsed;
+                        run(engine::step)
                     } else {
+                        self.started = true;
+                        let result = run(engine::init);
+                        let result = if result == 0 && !audio::init(window) {
+                            -1
+                        } else {
+                            result
+                        };
+                        // Loading is not game time; avoid simulating the entire startup delay.
+                        self.start_us = runtime::micros();
+                        self.last_frame_us = 0;
                         result
                     };
-                    // Loading is not game time; avoid simulating the entire startup delay.
-                    START_US = runtime::micros();
-                    LAST_FRAME_US = 0;
-                    result
-                };
-                if result == 1 {
-                    close();
-                    return 0;
-                }
-                if result != 0 {
-                    FAILED = true;
-                    audio::shutdown();
-                    failure_screen();
-                    return 0;
-                }
-                let now = runtime::micros();
-                if FPS_STARTED_US == 0 {
-                    FPS_STARTED_US = now;
-                } else {
-                    FPS_FRAMES += 1;
-                    let duration = now.wrapping_sub(FPS_STARTED_US);
-                    if duration >= 1_000_000 {
-                        FPS =
-                            ((u64::from(FPS_FRAMES) * 1_000_000 + duration / 2) / duration) as u32;
-                        FPS_FRAMES = 0;
-                        FPS_STARTED_US = now;
+                    if result == 1 {
+                        return Some(Action::Exit);
                     }
+                    if result != 0 {
+                        self.failed = true;
+                        audio::shutdown();
+                        self.redraw = true;
+                        return Some(Action::None);
+                    }
+                    let now = runtime::micros();
+                    if self.fps_started_us == 0 {
+                        self.fps_started_us = now;
+                    } else {
+                        self.fps_frames += 1;
+                        let duration = now.wrapping_sub(self.fps_started_us);
+                        if duration >= 1_000_000 {
+                            self.fps = ((u64::from(self.fps_frames) * 1_000_000 + duration / 2)
+                                / duration) as u32;
+                            self.fps_frames = 0;
+                            self.fps_started_us = now;
+                        }
+                    }
+                    self.redraw = true;
+                    return Some(Action::None);
                 }
-                render_frame();
-                draw(window, window.cast::<u8>().add(0x0c).cast());
-                return 0;
+                _ => {}
             }
-            _ => {}
-        }
-        BASE_MESSAGE.unwrap()(window, message)
-    }
-}
-
-unsafe fn render_frame() {
-    unsafe {
-        let frame = core::slice::from_raw_parts_mut(
-            ptr::addr_of_mut!(FRAME).cast::<u16>(),
-            display::WIDTH * display::HEIGHT,
-        );
-        paint(engine::frame(), |x, y, color| {
-            frame[y * display::WIDTH + x] = color
-        });
-        if HELP {
-            help::paint(frame);
-            let (mix_ms, state, submits) = audio::diagnostics();
-            help::audio_status(frame, mix_ms, state, submits);
-            help::audio_reset(frame, AUDIO_RESET_DONE);
-        } else {
-            help::performance(frame, FPS, audio::max_fill_ms());
+            None
         }
     }
-}
-
-unsafe fn toggle_help() {
-    unsafe {
-        HELP = !HELP;
-        if HELP {
-            HELP_STARTED_US = runtime::micros();
-            HELP_DRAW_US = HELP_STARTED_US;
-            AUDIO_RESET_DONE = false;
-        } else {
-            START_US = START_US.wrapping_add(runtime::micros().wrapping_sub(HELP_STARTED_US));
-            FPS_STARTED_US = 0;
-            FPS_FRAMES = 0;
-        }
-        render_frame();
-        draw(WINDOW, WINDOW.cast::<u8>().add(0x0c).cast());
-    }
-}
-
-unsafe extern "C" fn draw(window: *mut c_void, invalid: *const peg::Rect) {
-    unsafe {
-        let mut bitmap = peg::Bitmap {
-            bpp: 16,
-            flags: 0,
-            width: display::WIDTH as u16,
-            height: display::HEIGHT as u16,
-            reserved: 0,
-            refcount: 1,
-            data: ptr::addr_of_mut!(FRAME).cast(),
-        };
-        raw::blit(window, invalid, &mut bitmap);
-    }
-}
-
-unsafe fn failure_screen() {
-    unsafe {
-        for y in 0..display::HEIGHT {
-            for x in 0..display::WIDTH {
-                ptr::addr_of_mut!(FRAME)
-                    .cast::<u16>()
-                    .add(y * display::WIDTH + x)
-                    .write(0x4000);
+    unsafe fn toggle_help(&mut self) {
+        unsafe {
+            self.help = !self.help;
+            if self.help {
+                self.help_started_us = runtime::micros();
+                self.help_draw_us = self.help_started_us;
+                self.audio_reset_done = false;
+            } else {
+                self.start_us = self
+                    .start_us
+                    .wrapping_add(runtime::micros().wrapping_sub(self.help_started_us));
+                self.fps_started_us = 0;
+                self.fps_frames = 0;
             }
+            self.redraw = true;
         }
-        // A small fixed message also works when engine initialization failed.
-        for (i, c) in b"DOOM ERROR  Q EXIT".iter().enumerate() {
-            let rows: [u8; 7] = match c {
-                b'D' => [30, 17, 17, 17, 17, 17, 30],
-                b'O' => [14, 17, 17, 17, 17, 17, 14],
-                b'M' => [17, 27, 21, 21, 17, 17, 17],
-                b'E' => [31, 16, 16, 30, 16, 16, 31],
-                b'R' => [30, 17, 17, 30, 20, 18, 17],
-                b'Q' => [14, 17, 17, 17, 21, 18, 13],
-                b'X' => [17, 17, 10, 4, 10, 17, 17],
-                b'I' => [14, 4, 4, 4, 4, 4, 14],
-                b'T' => [31, 4, 4, 4, 4, 4, 4],
-                _ => [0; 7],
-            };
-            for (y, row) in rows.iter().enumerate() {
-                for x in 0..5 {
-                    if row & (1 << (4 - x)) != 0 {
-                        for dy in 0..4 {
-                            for dx in 0..4 {
-                                let px = 220 + i * 24 + x * 4 + dx;
-                                let py = 220 + y * 4 + dy;
-                                ptr::addr_of_mut!(FRAME)
-                                    .cast::<u16>()
-                                    .add(py * display::WIDTH + px)
-                                    .write(0xffff);
+    }
+    unsafe fn failure_screen(&self, pixels: &mut [u16]) {
+        unsafe {
+            for y in 0..display::HEIGHT {
+                for x in 0..display::WIDTH {
+                    pixels
+                        .as_mut_ptr()
+                        .add(y * display::WIDTH + x)
+                        .write(0x4000);
+                }
+            }
+            // A small fixed message also works when engine initialization failed.
+            for (i, c) in b"DOOM ERROR  Q EXIT".iter().enumerate() {
+                let rows: [u8; 7] = match c {
+                    b'D' => [30, 17, 17, 17, 17, 17, 30],
+                    b'O' => [14, 17, 17, 17, 17, 17, 14],
+                    b'M' => [17, 27, 21, 21, 17, 17, 17],
+                    b'E' => [31, 16, 16, 30, 16, 16, 31],
+                    b'R' => [30, 17, 17, 30, 20, 18, 17],
+                    b'Q' => [14, 17, 17, 17, 21, 18, 13],
+                    b'X' => [17, 17, 10, 4, 10, 17, 17],
+                    b'I' => [14, 4, 4, 4, 4, 4, 14],
+                    b'T' => [31, 4, 4, 4, 4, 4, 4],
+                    _ => [0; 7],
+                };
+                for (y, row) in rows.iter().enumerate() {
+                    for x in 0..5 {
+                        if row & (1 << (4 - x)) != 0 {
+                            for dy in 0..4 {
+                                for dx in 0..4 {
+                                    let px = 220 + i * 24 + x * 4 + dx;
+                                    let py = 220 + y * 4 + dy;
+                                    pixels
+                                        .as_mut_ptr()
+                                        .add(py * display::WIDTH + px)
+                                        .write(0xffff);
+                                }
                             }
                         }
                     }
                 }
             }
         }
-        draw(WINDOW, WINDOW.cast::<u8>().add(0x0c).cast());
     }
 }
-
-#[panic_handler]
-fn panic(_: &PanicInfo<'_>) -> ! {
-    loop {
-        core::hint::spin_loop();
+impl Application for Doom {
+    fn mounted(&mut self, window: Window) -> Action {
+        self.window = window.raw;
+        unsafe {
+            self.start_us = runtime::micros();
+            raw::set_timer(self.window, TIMER, 1, 1);
+        }
+        Action::Redraw
+    }
+    fn raw_event(&mut self, message: &peg::Message) -> Option<Action> {
+        self.redraw = false;
+        let action = unsafe { self.message(message) };
+        if self.redraw && action != Some(Action::Exit) {
+            Some(Action::Redraw)
+        } else {
+            action
+        }
+    }
+    fn event(&mut self, _: Event) -> Action {
+        Action::None
+    }
+    fn can_exit(&mut self) -> bool {
+        unsafe {
+            if !audio::shutdown() {
+                self.failed = true;
+                return false;
+            }
+            raw::kill_timer(self.window, TIMER);
+            engine::shutdown();
+        }
+        true
+    }
+    fn draw(&self, pixels: &mut [u16]) {
+        unsafe {
+            if self.failed {
+                self.failure_screen(pixels);
+                return;
+            }
+            if !self.started {
+                pixels.fill(0);
+                return;
+            }
+            paint(engine::frame(), |x, y, color| {
+                pixels[y * display::WIDTH + x] = color
+            });
+            if self.help {
+                help::paint(pixels);
+                let (mix_ms, state, submits) = audio::diagnostics();
+                help::audio_status(pixels, mix_ms, state, submits);
+                help::audio_reset(pixels, self.audio_reset_done);
+            } else {
+                help::performance(pixels, self.fps, audio::max_fill_ms());
+            }
+        }
     }
 }

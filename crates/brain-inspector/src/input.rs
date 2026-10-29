@@ -26,6 +26,7 @@ pub struct Input {
     pub mode: Mode,
     pub locked: bool,
     pub window_clip: bool,
+    pub panic_confirm: bool,
     pub history: [KeyEvent; 16],
     pub count: usize,
     pub cursor: (usize, usize),
@@ -39,6 +40,7 @@ impl Default for Input {
             mode: Mode::Text,
             locked: false,
             window_clip: true,
+            panic_confirm: false,
             history: [KeyEvent::default(); 16],
             count: 0,
             cursor: (400, 240),
@@ -49,6 +51,30 @@ impl Default for Input {
 }
 
 impl Input {
+    /// Some(true) confirms a panic; Some(false) consumes the confirmation input.
+    pub fn panic_test(&mut self, event: KeyEvent) -> Option<bool> {
+        if self.mode != Mode::Settings || self.locked {
+            self.panic_confirm = false;
+            return None;
+        }
+        let down = event.kind != peg::PM_KEY_UP;
+        if self.panic_confirm {
+            if down && matches!(event.key, 0x59 | 0x79) {
+                self.panic_confirm = false;
+                return Some(true);
+            }
+            if down && matches!(event.key, 0x4e | 0x6e | key::ESCAPE | key::BACKSPACE) {
+                self.panic_confirm = false;
+            }
+            return Some(false);
+        }
+        if down && matches!(event.key, 0x50 | 0x70) && event.flags as u32 & peg::KMOD_SHIFT != 0 {
+            self.panic_confirm = true;
+            return Some(false);
+        }
+        None
+    }
+
     /// Returns whether the event is an app control, including its release.
     pub fn key(&mut self, event: KeyEvent, now: u64) -> bool {
         self.history.copy_within(0..15, 1);
