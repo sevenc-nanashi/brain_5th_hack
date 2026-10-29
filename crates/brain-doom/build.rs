@@ -58,6 +58,45 @@ fn main() {
         inputs.join("PureDOOM.h").display()
     );
     let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
+    let bank = (0..count)
+        .map(|i| directory + i * 16)
+        .find(|&r| &bytes[r + 8..r + 16] == b"GENMIDI\0")
+        .expect("WAD lacks GENMIDI instruments");
+    let bank = &bytes[word(bank)..word(bank) + word(bank + 4)];
+    assert!(
+        bank.len() >= 8 + 175 * 36 && &bank[..8] == b"#OPL_II#",
+        "Invalid GENMIDI"
+    );
+    fs::write(out.join("genmidi.bin"), &bank[..8 + 175 * 36]).unwrap();
+    println!(
+        "cargo:rustc-env=DOOM_GENMIDI={}",
+        out.join("genmidi.bin").display()
+    );
+    let frequencies: Vec<u16> = (0..4096)
+        .map(|pitch| {
+            let hz = 440.0 * 2.0f64.powf((pitch as f64 / 32.0 - 69.0) / 12.0);
+            let mut block = 0u16;
+            let mut number = hz * 1048576.0 / 49716.0;
+            while number > 1023.0 && block < 7 {
+                number /= 2.0;
+                block += 1;
+            }
+            (number.round().min(1023.0) as u16) | (block << 10)
+        })
+        .collect();
+    fs::write(out.join("opl-pitch.rs"), format!("{frequencies:?}")).unwrap();
+    let levels: Vec<u8> = (0..128)
+        .map(|v| {
+            if v == 0 {
+                63
+            } else {
+                (-20.0 * (v as f64 / 127.0).log10() / 0.75)
+                    .round()
+                    .min(63.0) as u8
+            }
+        })
+        .collect();
+    fs::write(out.join("opl-volume.rs"), format!("{levels:?}")).unwrap();
     let target = env::var("TARGET").unwrap();
     let arm = target == "armv7a-none-eabi";
     let cc = env::var("DOOM_CC").unwrap_or_else(|_| "clang-20".into());
@@ -88,6 +127,24 @@ fn main() {
             "-DBRAIN_ARM",
         ]);
     }
+    for (source, name) in [
+        (inputs.join("opal.c"), "opal"),
+        (root.join("engine/opl.c"), "opl"),
+    ] {
+        println!("cargo:rerun-if-changed={}", source.display());
+        let mut command = Command::new(&cc);
+        command.args(compile.get_args());
+        // OPL synthesis dominates audio refill time on the device.
+        command.arg("-O3");
+        run(command
+            .arg("-I")
+            .arg(&inputs)
+            .arg("-c")
+            .arg(source)
+            .arg("-o")
+            .arg(out.join(format!("{name}.o"))));
+    }
+    println!("cargo:rerun-if-changed={}", inputs.join("opal.h").display());
     run(compile
         .arg("-I")
         .arg(&inputs)
@@ -96,10 +153,15 @@ fn main() {
         .arg("-o")
         .arg(out.join("doom.o")));
     let mut archive = Command::new(ar);
+    if out.join("libdoom.a").exists() {
+        fs::remove_file(out.join("libdoom.a")).unwrap();
+    }
     archive
         .arg("crs")
         .arg(out.join("libdoom.a"))
-        .arg(out.join("doom.o"));
+        .arg(out.join("doom.o"))
+        .arg(out.join("opal.o"))
+        .arg(out.join("opl.o"));
     if arm {
         run(Command::new(cc)
             .args([

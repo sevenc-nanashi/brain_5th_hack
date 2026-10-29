@@ -1,6 +1,6 @@
 use brain_doom::engine;
 use core::{ffi::c_void, ptr};
-use reflex::audio;
+use reflex::{audio, runtime};
 
 const MIX_SAMPLES: usize = 512 * 2;
 const SAMPLES: usize = 4096 / size_of::<i16>();
@@ -9,10 +9,12 @@ const _: () = assert!(SAMPLES.is_multiple_of(MIX_SAMPLES));
 static mut BUFFERS: [[i16; SAMPLES]; 2] = [[0; SAMPLES]; 2];
 static mut HANDLE: audio::Handle = ptr::null_mut();
 static mut STARTED: bool = false;
+static mut MAX_FILL_US: u64 = 0;
+static mut SUBMITS: u32 = 0;
 
 unsafe fn fill(index: usize) -> bool {
     unsafe {
-        // Match the 4096-byte staging size verified with Inspector.
+        let start = runtime::micros();
         for offset in (0..SAMPLES).step_by(MIX_SAMPLES) {
             if super::run(engine::mix) != 0 {
                 return false;
@@ -25,6 +27,7 @@ unsafe fn fill(index: usize) -> bool {
                 MIX_SAMPLES,
             );
         }
+        MAX_FILL_US = MAX_FILL_US.max(runtime::micros().wrapping_sub(start));
         true
     }
 }
@@ -35,7 +38,10 @@ pub unsafe fn init(window: *mut c_void) -> bool {
         if HANDLE.is_null() {
             return false;
         }
-        if !audio::set_staging_bytes(HANDLE, BYTES) || !fill(0) || !fill(1) {
+        if !audio::set_staging_bytes(HANDLE, BYTES) {
+            return false;
+        }
+        if !fill(0) || !fill(1) {
             return false;
         }
         let data = ptr::addr_of!(BUFFERS).cast::<u8>();
@@ -68,7 +74,28 @@ pub unsafe fn refill(index: i32) -> bool {
         return false;
     }
     unsafe {
-        !HANDLE.is_null() && fill(index as usize) && audio::submit(HANDLE, index as u32, BYTES)
+        if HANDLE.is_null() || !fill(index as usize) || !audio::submit(HANDLE, index as u32, BYTES)
+        {
+            return false;
+        }
+        SUBMITS = SUBMITS.saturating_add(1);
+        true
+    }
+}
+
+pub unsafe fn max_fill_ms() -> u32 {
+    unsafe { MAX_FILL_US.div_ceil(1000).min(u32::MAX as u64) as u32 }
+}
+
+pub unsafe fn diagnostics() -> (u32, Option<u32>, u32) {
+    unsafe {
+        let mut status = audio::Status::default();
+        let state = if !HANDLE.is_null() && audio::status(HANDLE, &mut status) {
+            Some(status.state)
+        } else {
+            None
+        };
+        (max_fill_ms(), state, SUBMITS)
     }
 }
 

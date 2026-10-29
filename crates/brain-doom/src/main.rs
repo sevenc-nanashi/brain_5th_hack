@@ -1,6 +1,6 @@
 #![no_std]
 #![no_main]
-use brain_doom::{doom_key, engine, paint};
+use brain_doom::{doom_key, engine, help, paint};
 use core::{arch::global_asm, ffi::c_void, panic::PanicInfo, ptr};
 use reflex::{
     app::{self, AppContext},
@@ -33,7 +33,14 @@ static mut READY: bool = false;
 static mut STARTED: bool = false;
 static mut START_US: u64 = 0;
 static mut LAST_FRAME_US: u64 = 0;
+static mut FPS_STARTED_US: u64 = 0;
+static mut FPS_FRAMES: u32 = 0;
+static mut FPS: u32 = 0;
 static mut FAILED: bool = false;
+static mut HELP: bool = false;
+static mut HELP_STARTED_US: u64 = 0;
+static mut FUNCTION_KEYS: [i32; 6] = [0; 6];
+static mut VOLUME_KEYS: u8 = 0;
 static mut FRAME: [u16; display::WIDTH * display::HEIGHT] = [0; display::WIDTH * display::HEIGHT];
 
 unsafe extern "C" {
@@ -118,17 +125,71 @@ unsafe extern "C" fn message(window: *mut c_void, message: *const peg::Message) 
             }
             peg::PM_KEY | peg::PM_KEY_DOWN | peg::PM_KEY_UP => {
                 if matches!(msg.param, peg::key::PAGE_UP | peg::key::PAGE_DOWN) {
-                    // Let the host handle Shift+PageUp/PageDown and its shared volume.
-                    return BASE_MESSAGE.unwrap()(window, message);
+                    let bit = if msg.param == peg::key::PAGE_UP { 1 } else { 2 };
+                    if msg.kind == peg::PM_KEY_UP {
+                        VOLUME_KEYS &= !bit;
+                    } else if VOLUME_KEYS & bit == 0 {
+                        VOLUME_KEYS |= bit;
+                        let level = reflex::audio::volume();
+                        let next = if bit == 1 {
+                            (level + 1).min(9)
+                        } else {
+                            level.saturating_sub(1)
+                        };
+                        if !reflex::audio::set_volume(next) {
+                            FAILED = true;
+                            audio::shutdown();
+                            failure_screen();
+                        }
+                    }
+                    return 0;
                 }
                 let pressed = msg.kind != peg::PM_KEY_UP;
-                // Q exits the app immediately; Escape remains Doom's menu key.
                 if pressed
+                    && FAILED
                     && (msg.param == b'q' as u16
                         || msg.param == b'Q' as u16
-                        || (FAILED && msg.param == peg::key::ESCAPE))
+                        || matches!(
+                            msg.param,
+                            peg::key::HOME | peg::key::SELECT_FROM_LIST | peg::key::ESCAPE
+                        ))
                 {
                     close();
+                    return 0;
+                }
+                if STARTED
+                    && !FAILED
+                    && (peg::key::HOME..=peg::key::SELECT_FROM_LIST).contains(&msg.param)
+                {
+                    let index = (msg.param - peg::key::HOME) as usize;
+                    if pressed {
+                        if FUNCTION_KEYS[index] == 0 {
+                            let shifted = msg.data.ext_params[0] as u32 & peg::KMOD_SHIFT != 0;
+                            let number = index + if shifted { 6 } else { 0 };
+                            let key = [
+                                0xbb, 0xbc, 0xbd, 0xbe, 0xbf, 0xc0, 0xc1, 0xc2, 0xc3, 0xc4, 0xd7,
+                                0xd8,
+                            ][number];
+                            FUNCTION_KEYS[index] = key;
+                            if number == 11 {
+                                toggle_help();
+                            } else if !HELP && !matches!(number, 1 | 2 | 5 | 8) {
+                                engine::key(key, true);
+                            }
+                        }
+                    } else {
+                        let key = FUNCTION_KEYS[index];
+                        FUNCTION_KEYS[index] = 0;
+                        if key != 0 && key != 0xd8 {
+                            engine::key(key, false);
+                        }
+                    }
+                    return 0;
+                }
+                if HELP && pressed {
+                    if matches!(msg.param, peg::key::BACKSPACE | peg::key::ESCAPE) {
+                        toggle_help();
+                    }
                     return 0;
                 }
                 if STARTED
@@ -151,7 +212,7 @@ unsafe extern "C" fn message(window: *mut c_void, message: *const peg::Message) 
                 return 0;
             }
             peg::PM_TIMER if msg.param == TIMER as u16 => {
-                if FAILED {
+                if FAILED || HELP {
                     return 0;
                 }
                 let elapsed = runtime::micros().wrapping_sub(START_US);
@@ -185,18 +246,60 @@ unsafe extern "C" fn message(window: *mut c_void, message: *const peg::Message) 
                     failure_screen();
                     return 0;
                 }
-                paint(engine::frame(), |x, y, color| {
-                    ptr::addr_of_mut!(FRAME)
-                        .cast::<u16>()
-                        .add(y * display::WIDTH + x)
-                        .write(color);
-                });
+                let now = runtime::micros();
+                if FPS_STARTED_US == 0 {
+                    FPS_STARTED_US = now;
+                } else {
+                    FPS_FRAMES += 1;
+                    let duration = now.wrapping_sub(FPS_STARTED_US);
+                    if duration >= 1_000_000 {
+                        FPS =
+                            ((u64::from(FPS_FRAMES) * 1_000_000 + duration / 2) / duration) as u32;
+                        FPS_FRAMES = 0;
+                        FPS_STARTED_US = now;
+                    }
+                }
+                render_frame();
                 draw(window, window.cast::<u8>().add(0x0c).cast());
                 return 0;
             }
             _ => {}
         }
         BASE_MESSAGE.unwrap()(window, message)
+    }
+}
+
+unsafe fn render_frame() {
+    unsafe {
+        let frame = core::slice::from_raw_parts_mut(
+            ptr::addr_of_mut!(FRAME).cast::<u16>(),
+            display::WIDTH * display::HEIGHT,
+        );
+        paint(engine::frame(), |x, y, color| {
+            frame[y * display::WIDTH + x] = color
+        });
+        if HELP {
+            help::paint(frame);
+            let (mix_ms, state, submits) = audio::diagnostics();
+            help::audio_status(frame, mix_ms, state, submits);
+        } else {
+            help::performance(frame, FPS, audio::max_fill_ms());
+        }
+    }
+}
+
+unsafe fn toggle_help() {
+    unsafe {
+        HELP = !HELP;
+        if HELP {
+            HELP_STARTED_US = runtime::micros();
+        } else {
+            START_US = START_US.wrapping_add(runtime::micros().wrapping_sub(HELP_STARTED_US));
+            FPS_STARTED_US = 0;
+            FPS_FRAMES = 0;
+        }
+        render_frame();
+        draw(WINDOW, WINDOW.cast::<u8>().add(0x0c).cast());
     }
 }
 

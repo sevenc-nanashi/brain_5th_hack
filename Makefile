@@ -21,6 +21,8 @@ doom:
 	mkdir -p $(DOOM_DIR)
 	$(OBJCOPY) -O binary $(BUILD_DIR)/armv7a-none-eabi/release/brain-doom $(DOOM_DIR)/AppMain.bin
 	touch $(DOOM_DIR)/index.din
+	cp $(BUILD_DIR)/doom-inputs/OPAL-LICENSE.txt $(DOOM_DIR)/OPAL-LICENSE.txt
+	cp crates/brain-doom/assets/FONT-LICENSE.txt $(DOOM_DIR)/FONT-LICENSE.txt
 
 doom-preview:
 	DOOM_INPUTS=$(abspath $(BUILD_DIR)/doom-inputs) $(CARGO) run -p brain-doom --example preview --features engine --release --target-dir $(BUILD_DIR) -- $(BUILD_DIR)/doom-preview.ppm

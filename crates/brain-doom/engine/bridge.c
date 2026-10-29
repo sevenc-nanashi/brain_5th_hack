@@ -64,25 +64,70 @@ int brain_doom_init(void) {
     doom_set_default_int("key_use", DOOM_KEY_SPACE);
     doom_set_default_int("key_strafeleft", DOOM_KEY_A);
     doom_set_default_int("key_straferight", DOOM_KEY_D);
-    doom_set_default_int("key_speed", DOOM_KEY_X);
-    static char *args[] = {"doom", "-nomusic"};
-    doom_init(2, args, DOOM_FLAG_HIDE_MOUSE_OPTIONS | DOOM_FLAG_HIDE_MUSIC_OPTIONS);
+    doom_set_default_int("key_speed", DOOM_KEY_SHIFT);
+    static char *args[] = {"doom"};
+    doom_init(1, args, DOOM_FLAG_HIDE_MOUSE_OPTIONS);
     singletics = 1; // The host drives 35 Hz; never wait for network tics inside PEG.
     return 0;
 }
+static int mapped_key(int code, int pressed);
 int brain_doom_step(void) {
     if (CHECKPOINT()) return exit_status;
+    // Resolve each key after earlier menu events, not when the host queues it.
+    if (gamemode != commercial || W_CheckNumForName("map01") >= 0) {
+        while (eventtail != eventhead) {
+            event_t event = events[eventtail];
+            eventtail = (eventtail + 1) & (MAXEVENTS - 1);
+            if (event.type == ev_keydown || event.type == ev_keyup)
+                event.data1 = mapped_key(event.data1, event.type == ev_keydown);
+            if (!M_Responder(&event)) G_Responder(&event);
+        }
+    }
     doom_update();
     return 0;
 }
 const unsigned char *brain_doom_frame(void) { return doom_get_framebuffer(3); }
 _Static_assert(SAMPLECOUNT == 512 && DOOM_SAMPLERATE == 11025, "PCM adapter format changed");
+extern int brain_music_mix(short *, void *, const unsigned char *, unsigned int, int, int, int);
 int brain_doom_mix(void) {
     if (CHECKPOINT()) return exit_status;
     doom_get_sound_buffer();
+    if (mus_data && mus_playing_s_sound) {
+        if ((unsigned int)mus_header.scoreStart + mus_header.scoreLen >
+            (unsigned int)W_LumpLength(mus_playing_s_sound->lumpnum)) return -1;
+        if (!brain_music_mix(mixbuffer, mus_playing_s_sound,
+                            mus_data + mus_header.scoreStart, mus_header.scoreLen,
+                            mus_playing, mus_loop, snd_MusicVolume)) return -1;
+    } else {
+        brain_music_mix(mixbuffer, 0, 0, 0, 0, 0, snd_MusicVolume);
+    }
     return 0;
 }
 const short *brain_doom_sound(void) { return mixbuffer; }
+static int mapped_key(int code, int pressed) {
+    static int held[256];
+    static const char weapons[] = "qwertyu";
+    int mapped = code;
+    if (pressed) {
+        if (!held[code]) {
+            if (!menuactive && !messageToPrint && gamestate == GS_LEVEL) {
+                for (int i = 0; i < 7; ++i) {
+                    if (code == weapons[i]) mapped = '1' + i;
+                }
+            }
+            if (menuactive && !messageToPrint && code == DOOM_KEY_SPACE)
+                mapped = DOOM_KEY_ENTER;
+            held[code] = mapped + 1;
+        }
+        return held[code] - 1;
+    } else {
+        // Release the same key even if a menu opened while it was held.
+        if (held[code]) mapped = held[code] - 1;
+        held[code] = 0;
+        return mapped;
+    }
+}
+
 void brain_doom_key(int code, int pressed) {
     if (pressed) doom_key_down((doom_key_t)code);
     else doom_key_up((doom_key_t)code);

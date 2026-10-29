@@ -1,5 +1,7 @@
 #![no_std]
 
+pub mod help;
+
 pub const DOOM_WIDTH: usize = 320;
 pub const DOOM_HEIGHT: usize = 200;
 
@@ -11,8 +13,10 @@ pub fn doom_key(code: u16) -> Option<i32> {
         key::UP => 0xad,
         key::RIGHT => 0xae,
         key::DOWN => 0xaf,
-        key::BACKSPACE => 127,
+        key::BACKSPACE => 27,
         key::SHIFT => 0xb6,
+        key::INPUT_MODE => 9,
+        key::AUDIO => 0xff, // Pause
         0x41..=0x5a => i32::from(code + 32),
         9 | 13 | 27 | 32..=126 => i32::from(code),
         _ => return None,
@@ -42,3 +46,6 @@ pub fn paint(rgb: &[u8], mut pixel: impl FnMut(usize, usize, u16)) {
 
 #[cfg(feature = "engine")]
 pub mod engine;
+
+#[cfg(feature = "engine")]
+mod music;

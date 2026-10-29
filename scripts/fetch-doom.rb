@@ -5,7 +5,11 @@ require 'fileutils'
 root = File.expand_path('..', __dir__)
 destination = File.expand_path(ARGV.fetch(0, 'target/doom-inputs'), root)
 FileUtils.mkdir_p(destination)
+opl = 'https://raw.githubusercontent.com/Wohlstand/libADLMIDI/3e9ddb13ad39e2de0ca7eb003e622d4741aa50b7/src/chips/opal'
 files = {
+  'opal.c' => ["#{opl}/opal.c", '1538eb96af39b3549f8bb487c3ff680da23cc0e19dd4ed7abca2eed46d97ccf0'],
+  'opal.h' => ["#{opl}/opal.h", '7878746c9c1a53f6bef23cce23af5732fdddbcafba084d246b23573ef449bda0'],
+  'OPAL-LICENSE.txt' => ["#{opl}/LICENSE.txt", '0838567096038054ff567932f6b6cfd9c22732a2339a5b1a93f3fd42aee8f253'],
   'PureDOOM.h' => [
     'https://raw.githubusercontent.com/Daivuk/PureDOOM/355cfbd16fac119718879239336ee2ea408886bd/PureDOOM.h',
     'ec16ce721436bf3fa4c338320afedd56a93c0b563a94ebf283718503c71ca780'
