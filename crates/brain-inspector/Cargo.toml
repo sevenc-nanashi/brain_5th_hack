@@ -7,7 +7,7 @@ edition.workspace = true
 device = ["reflex/application", "reflex/panic-qr"]
 
 [dependencies]
-reflex = { path = "../reflex" }
+reflex = { path = "../reflex", features = ["text"] }
 
 [[bin]]
 name = "brain-inspector"

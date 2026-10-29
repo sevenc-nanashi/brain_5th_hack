@@ -24,6 +24,17 @@ pub struct Measurements {
     pub touch: Option<(u16, u16)>,
 }
 
+#[derive(Clone, Copy, Default)]
+pub struct AudioSnapshot {
+    pub active: u32,
+    pub cursors: [u32; 2],
+    pub lengths: [u32; 2],
+    pub bytes: u32,
+    pub param: u16,
+    pub data: [i32; 2],
+    pub submit_us: u64,
+}
+
 #[derive(Clone, Copy)]
 pub struct AudioMeasurements {
     pub buffer_bytes: u32,
@@ -45,6 +56,12 @@ pub struct AudioMeasurements {
     pub staging: [u32; 2],
     pub cursors: [u32; 2],
     pub restarts: u32,
+    pub active: u32,
+    pub lengths: [u32; 2],
+    pub submit_us: u64,
+    pub max_submit_us: u64,
+    pub initial: Option<AudioSnapshot>,
+    pub stalled: Option<AudioSnapshot>,
 }
 
 impl Default for AudioMeasurements {
@@ -69,6 +86,12 @@ impl Default for AudioMeasurements {
             staging: [0; 2],
             cursors: [0; 2],
             restarts: 0,
+            active: 0,
+            lengths: [0; 2],
+            submit_us: 0,
+            max_submit_us: 0,
+            initial: None,
+            stalled: None,
         }
     }
 }
@@ -108,23 +131,32 @@ impl Canvas<'_> {
 }
 impl Write for Canvas<'_> {
     fn write_str(&mut self, text: &str) -> fmt::Result {
-        for c in text.bytes() {
-            for (y, row) in glyph(c).iter().enumerate() {
-                for x in 0..5 {
-                    if row & (1 << (4 - x)) != 0 {
-                        for dy in 0..self.scale {
-                            for dx in 0..self.scale {
-                                self.pixel(
-                                    self.x + x * self.scale + dx,
-                                    self.y + y * self.scale + dy,
-                                    self.color,
-                                );
+        let foreground = self.color;
+        let background = foreground ^ 0xffff;
+        for ch in text.chars() {
+            let mut encoded = [0; 4];
+            let x = self.x;
+            let y = self.y;
+            let scale = self.scale;
+            // Sample the shared 2x bitmap at its native 6x13 resolution for dense views.
+            reflex::text::draw(
+                |dx, dy, color| {
+                    if dx % 2 == 0 && dy % 2 == 0 && color != background {
+                        for sy in 0..scale {
+                            for sx in 0..scale {
+                                self.pixel(x + dx / 2 * scale + sx, y + dy / 2 * scale + sy, color);
                             }
                         }
                     }
-                }
-            }
-            self.x += 6 * self.scale;
+                },
+                0,
+                0,
+                ch.encode_utf8(&mut encoded),
+                foreground,
+                background,
+                1,
+            );
+            self.x += (reflex::text::CELL_WIDTH / 2) * scale;
         }
         Ok(())
     }
@@ -143,72 +175,80 @@ pub fn render(pixels: &mut [u16], m: &Measurements, edge: usize, input: &Input) 
         scale: 2,
     };
     if input.mode == Mode::Audio {
+        c.scale = 1;
         c.pixels.fill(0);
         let a = &m.audio;
-        c.at(28, 20, 0xffff);
-        write!(c, "AUDIO TEST   11025HZ 16BIT STEREO").unwrap();
-        c.at(28, 54, 0xffe0);
-        write!(c, "Q  PLAY ONCE    W  STREAM    P  STOP").unwrap();
-        c.at(28, 86, 0xffff);
+        c.at(28, 12, 0xffff);
+        write!(c, "AUDIO 11025HZ/16/STEREO  Q:ONCE W:STREAM P:STOP").unwrap();
+        c.at(28, 34, 0xffe0);
+        write!(c, "LEFT/RIGHT INPUT {}  INTERNAL 4096", a.buffer_bytes).unwrap();
+        c.at(28, 56, 0xffff);
         write!(
             c,
-            "MODE {}  CALL {}  {}",
-            if a.streaming { "STREAM" } else { "ONCE" },
+            "PAGEUP/DOWN VOL {}/9 {}  {} {}",
+            a.volume,
+            if a.volume_ok { "OK" } else { "FAIL" },
             a.call,
             if a.ok { "OK" } else { "FAIL" }
         )
         .unwrap();
-        c.at(28, 118, 0xffff);
+        c.at(28, 78, 0xffff);
         write!(
             c,
-            "HANDLE {:08X}  STATUS {}",
-            a.handle,
-            if a.status_ok { "OK" } else { "--" }
+            "STATE {} STATUS {} MS {} BYTE {}",
+            a.state,
+            if a.status_ok { "OK" } else { "FAIL" },
+            a.position_ms,
+            a.bytes
         )
         .unwrap();
-        c.at(28, 150, 0xffff);
+        c.at(28, 100, 0xffff);
         write!(
             c,
-            "STATE {}  MS {}  BYTE {}",
-            a.state, a.position_ms, a.bytes
+            "ACTIVE {} CUR {}/{} {}/{}",
+            a.active, a.cursors[0], a.lengths[0], a.cursors[1], a.lengths[1]
         )
         .unwrap();
-        c.at(28, 182, 0xffff);
+        c.at(28, 122, 0xffff);
         write!(
             c,
-            "EVENTS {}  TYPE {:04X} PARAM {:04X}",
-            a.events, a.last_kind, a.last_param
+            "EVENTS {} PARAM {:04X} DATA {} {}",
+            a.events, a.last_param, a.last_data[0], a.last_data[1]
         )
         .unwrap();
-        c.at(28, 214, 0xffff);
-        write!(c, "DATA {:08X} {:08X}", a.last_data[0], a.last_data[1]).unwrap();
-        c.at(28, 246, 0xffff);
-        write!(c, "SUBMIT 0={} 1={}", a.submitted[0], a.submitted[1]).unwrap();
-        c.at(28, 278, 0xffff);
-        write!(c, "STAGING {} {}", a.staging[0], a.staging[1]).unwrap();
-        c.at(28, 310, 0xffff);
+        c.at(28, 144, 0xffff);
         write!(
             c,
-            "CURSOR {} {}  RESTART {}",
-            a.cursors[0], a.cursors[1], a.restarts
+            "SUBMIT {} {} US {} MAX {}",
+            a.submitted[0], a.submitted[1], a.submit_us, a.max_submit_us
         )
         .unwrap();
-        c.at(28, 338, 0xffe0);
+        c.at(28, 166, 0xffff);
         write!(
             c,
-            "LEFT/RIGHT BUFFER {} B  {} MS",
-            a.buffer_bytes,
-            a.buffer_bytes * 1000 / (11025 * 4)
+            "STAGING {} {} RESTART {}",
+            a.staging[0], a.staging[1], a.restarts
         )
         .unwrap();
-        c.at(28, 370, 0xffff);
-        write!(
-            c,
-            "PAGEUP/DOWN VOLUME {} / 9  {}",
-            a.volume,
-            if a.volume_ok { "OK" } else { "FAIL" }
-        )
-        .unwrap();
+        for (label, snapshot, y) in [("START", a.initial, 192), ("STALL", a.stalled, 292)] {
+            c.at(28, y, 0xffe0);
+            if let Some(s) = snapshot {
+                write!(c, "{} ACTIVE {} BYTE {}", label, s.active, s.bytes).unwrap();
+                c.at(28, y + 22, 0xffff);
+                write!(
+                    c,
+                    "CUR {}/{} {}/{}",
+                    s.cursors[0], s.lengths[0], s.cursors[1], s.lengths[1]
+                )
+                .unwrap();
+                c.at(28, y + 44, 0xffff);
+                write!(c, "PARAM {:04X} DATA {} {}", s.param, s.data[0], s.data[1]).unwrap();
+                c.at(28, y + 66, 0xffff);
+                write!(c, "SUBMIT US {}", s.submit_us).unwrap();
+            } else {
+                write!(c, "{} --", label).unwrap();
+            }
+        }
         status(&mut c, input);
         return;
     }
@@ -247,8 +287,8 @@ pub fn render(pixels: &mut [u16], m: &Measurements, edge: usize, input: &Input) 
                 c.scale = scale;
                 c.at(28, y, 0xffff);
                 write!(c, "ABCDEFGHIJKLMNOPQRSTUVWXYZ").unwrap();
-                c.at(28, y + 9 * scale, 0xffff);
-                write!(c, "0123456789 : - = / , .").unwrap();
+                c.at(28, y + 14 * scale, 0xffff);
+                write!(c, "abcdefghijklmnopqrstuvwxyz").unwrap();
             }
             c.scale = 2;
             for (i, color) in [0xffff, 0xf800, 0x07e0, 0x001f, 0xffe0, 0x07ff, 0xf81f]
@@ -266,6 +306,7 @@ pub fn render(pixels: &mut [u16], m: &Measurements, edge: usize, input: &Input) 
             c.at(28, 338, 0);
             write!(c, "BLACK ON WHITE  0123456789").unwrap();
         } else if input.mode == Mode::Keys {
+            c.scale = 1;
             c.pixels.fill(0x0000);
             c.at(28, 18, 0xffff);
             write!(c, "KEY HISTORY - NEWEST FIRST").unwrap();
@@ -332,6 +373,7 @@ pub fn render(pixels: &mut [u16], m: &Measurements, edge: usize, input: &Input) 
         return;
     }
     c.pixels.fill(0);
+    c.scale = 1;
     c.at(28, 44, 0xffff);
     write!(c, "SETTINGS").unwrap();
     c.rect("SCREEN API", m.screen, 66, 0xffff);
@@ -368,13 +410,14 @@ pub fn render(pixels: &mut [u16], m: &Measurements, edge: usize, input: &Input) 
 }
 
 fn status(c: &mut Canvas<'_>, input: &Input) {
+    c.scale = 1;
     // Leave the pixel cursor visible at the bottom too.
-    let top = if input.mode == Mode::Pixels && input.cursor.1 >= 414 {
+    let top = if input.mode == Mode::Pixels && input.cursor.1 >= 450 {
         82
     } else {
-        414
+        450
     };
-    for y in top..top + 54 {
+    for y in top..top + 18 {
         for x in 22..780 {
             c.pixel(x, y, 0);
         }
@@ -390,60 +433,8 @@ fn status(c: &mut Canvas<'_>, input: &Input) {
     c.at(28, top + 2, 0xffe0);
     write!(
         c,
-        "{name}  {}  SHIFT: HOLD 1S / RELEASE",
+        "{name} {} | SHIFT:HOLD 1S | HOME:TEXT JP:KEYS EN:TOUCH MY:PIXELS HISTORY:AUDIO LIST:SETTINGS ESC:EXIT",
         if input.locked { "LOCKED" } else { "UNLOCKED" }
     )
     .unwrap();
-    c.at(28, top + 22, 0xffff);
-    write!(c, "HOME:TEXT JP:KEYS EN:TOUCH MY:PIXELS").unwrap();
-    c.at(28, top + 40, 0xffff);
-    write!(c, "HISTORY:AUDIO LIST:SETTINGS ESC:EXIT").unwrap();
-}
-
-fn glyph(c: u8) -> [u8; 7] {
-    match c {
-        b'0' => [14, 17, 19, 21, 25, 17, 14],
-        b'1' => [4, 12, 4, 4, 4, 4, 14],
-        b'2' => [14, 17, 1, 2, 4, 8, 31],
-        b'3' => [30, 1, 1, 14, 1, 1, 30],
-        b'4' => [2, 6, 10, 18, 31, 2, 2],
-        b'5' => [31, 16, 16, 30, 1, 1, 30],
-        b'6' => [14, 16, 16, 30, 17, 17, 14],
-        b'7' => [31, 1, 2, 4, 8, 8, 8],
-        b'8' => [14, 17, 17, 14, 17, 17, 14],
-        b'9' => [14, 17, 17, 15, 1, 1, 14],
-        b'A' => [14, 17, 17, 31, 17, 17, 17],
-        b'B' => [30, 17, 17, 30, 17, 17, 30],
-        b'C' => [14, 17, 16, 16, 16, 17, 14],
-        b'D' => [30, 17, 17, 17, 17, 17, 30],
-        b'E' => [31, 16, 16, 30, 16, 16, 31],
-        b'F' => [31, 16, 16, 30, 16, 16, 16],
-        b'G' => [14, 17, 16, 23, 17, 17, 15],
-        b'H' => [17, 17, 17, 31, 17, 17, 17],
-        b'I' => [14, 4, 4, 4, 4, 4, 14],
-        b'J' => [7, 2, 2, 2, 18, 18, 12],
-        b'K' => [17, 18, 20, 24, 20, 18, 17],
-        b'L' => [16, 16, 16, 16, 16, 16, 31],
-        b'M' => [17, 27, 21, 21, 17, 17, 17],
-        b'N' => [17, 25, 21, 19, 17, 17, 17],
-        b'O' => [14, 17, 17, 17, 17, 17, 14],
-        b'P' => [30, 17, 17, 30, 16, 16, 16],
-        b'Q' => [14, 17, 17, 17, 21, 18, 13],
-        b'R' => [30, 17, 17, 30, 20, 18, 17],
-        b'S' => [15, 16, 16, 14, 1, 1, 30],
-        b'T' => [31, 4, 4, 4, 4, 4, 4],
-        b'U' => [17, 17, 17, 17, 17, 17, 14],
-        b'V' => [17, 17, 17, 17, 17, 10, 4],
-        b'W' => [17, 17, 17, 21, 21, 21, 10],
-        b'X' => [17, 17, 10, 4, 10, 17, 17],
-        b'Y' => [17, 17, 10, 4, 4, 4, 4],
-        b'Z' => [31, 1, 2, 4, 8, 16, 31],
-        b':' => [0, 4, 4, 0, 4, 4, 0],
-        b'-' => [0, 0, 0, 31, 0, 0, 0],
-        b'=' => [0, 0, 31, 0, 31, 0, 0],
-        b'/' => [1, 1, 2, 4, 8, 16, 16],
-        b',' => [0, 0, 0, 0, 4, 4, 8],
-        b'.' => [0, 0, 0, 0, 0, 4, 4],
-        _ => [0; 7],
-    }
 }

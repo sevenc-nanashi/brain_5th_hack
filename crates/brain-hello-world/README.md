@@ -43,15 +43,15 @@ V690_H1 の `SharpLib.bin` のファイル位置 `0xE7A48` は比較・検索処
 
 V690_H1 で確認した経路（ファイル内オフセット）は次のとおり。
 
-| バイナリ | 位置 | 処理 |
-| --- | --- | --- |
-| PCConnect/AppMain.bin | `0x14670` | 保存済みコンテキストを読み、`+4` の実行パスを r0 に返す |
-| PCConnect/AppMain.bin | `0x14978` / `0x1497C` | 上記関数の返り値を引数に終了処理を呼ぶ |
-| PCConnect/AppMain.bin | `0x14758` / `0x1475C` | `LDR pc, [pc, #-4]` とアドレス `0x8401013C` |
-| SharpLib.bin | `0x1013C` | `B 0xE6BDC`（命令 `0xEA035AA6`） |
-| SharpLib.bin | `0xE6BDC` | 実行パスでアプリ登録を探し、関連する領域を解放 |
-| SharpLib.bin | `0xE6C64`〜`0xE6C74` | 種別 `0x10E`、パラメーター `2` の終了通知を送る |
-| SharpLib.bin | `0xE6C7C` | `sh_ExitApp : Type=PM_DICEVT_APP, Param=EVENT_APP_FINISH` のログを参照 |
+| バイナリ              | 位置                  | 処理                                                                   |
+| --------------------- | --------------------- | ---------------------------------------------------------------------- |
+| PCConnect/AppMain.bin | `0x14670`             | 保存済みコンテキストを読み、`+4` の実行パスを r0 に返す                |
+| PCConnect/AppMain.bin | `0x14978` / `0x1497C` | 上記関数の返り値を引数に終了処理を呼ぶ                                 |
+| PCConnect/AppMain.bin | `0x14758` / `0x1475C` | `LDR pc, [pc, #-4]` とアドレス `0x8401013C`                            |
+| SharpLib.bin          | `0x1013C`             | `B 0xE6BDC`（命令 `0xEA035AA6`）                                       |
+| SharpLib.bin          | `0xE6BDC`             | 実行パスでアプリ登録を探し、関連する領域を解放                         |
+| SharpLib.bin          | `0xE6C64`〜`0xE6C74`  | 種別 `0x10E`、パラメーター `2` の終了通知を送る                        |
+| SharpLib.bin          | `0xE6C7C`             | `sh_ExitApp : Type=PM_DICEVT_APP, Param=EVENT_APP_FINISH` のログを参照 |
 
 この終了関数には戻り経路があるため、Rust 側は `extern "C" fn(*const u8)` として呼ぶ。
 呼び出し後は通常どおりローダーへ戻す。単なる return では終了通知が欠けていた。
@@ -67,6 +67,10 @@ V690_H1 で確認した経路（ファイル内オフセット）は次のとお
 rustup target add armv7a-none-eabi
 make hello-world
 ```
+
+LLVM の `llvm-objcopy-20` が必要。別の名前でインストールされている場合は
+`make hello-world OBJCOPY=llvm-objcopy` のように指定する。
+出力した ELF ではなく、`AppMain.bin` と空の `index.din` を SD カードへコピーする。
 
 `CARGO`、`OBJCOPY`、`BUILD_DIR` は make の変数で指定できる。
 デバイス向けコンパイルは ARMv7-A / Cortex-A7、soft-float、panic=abort、static relocation。

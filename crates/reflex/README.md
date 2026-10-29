@@ -110,10 +110,10 @@ Hello World の起動処理は `.data` / `.bss` を初期化しないため、�
 
 - [event_dumper/peg_const.h](https://github.com/brain-hackers/lab/blob/5f97124e9d62a0e74698ebe9755f8fb91a60b004/x1/event_dumper/peg_const.h): メッセージとキーの ABI。
 - [event_dumper/peg_func.h](https://github.com/brain-hackers/lab/blob/5f97124e9d62a0e74698ebe9755f8fb91a60b004/x1/event_dumper/peg_func.h): PEG 関数・Bitmap ABI。元資料は CC0。
-- [Hello World の解析メモ](../../docs/hello-world.md): 描画アドレスと純正アプリの終了経路。
+- [Hello World の解析メモ](../brain-hello-world/README.md): 描画アドレスと純正アプリの終了経路。
 
 タイマー・ウィンドウ破棄は純正 PCConnect の公開入口に合わせ、フォーカス設定も
-純正のインライン処理を使用する。照合箇所は [Doom の解析メモ](../../docs/doom.md#reflex-の公開入口の照合) を参照。
+純正のインライン処理を使用する。照合箇所は [Doom の解析メモ](../brain-doom/README.md#reflex-の公開入口の照合) を参照。
 
 元資料の終了アドレス `0x840e7a48` は採用せず、V690_H1 で確認した公開入口
 `0x8401013c` を使う。PEG は固定の公開アドレスとオブジェクト配置を使うため、版の違いに弱い。

@@ -1,8 +1,9 @@
-use brain_inspector::AudioMeasurements;
+use brain_inspector::{AudioMeasurements, AudioSnapshot};
 use core::{ffi::c_void, ptr};
 use reflex::{audio, peg, runtime};
 
 const BLOCK: usize = 32768;
+const STAGING: u32 = 4096;
 static mut TONE: [[i16; BLOCK / 2]; 2] = [[0; BLOCK / 2]; 2];
 static mut HANDLE: audio::Handle = ptr::null_mut();
 static mut CONFIGURED: bool = false;
@@ -65,12 +66,8 @@ pub unsafe fn play(window: *mut c_void, streaming: bool, m: &mut AudioMeasuremen
         if !result(m, "OPEN", !HANDLE.is_null()) {
             return;
         }
-        if m.buffer_bytes != BLOCK as u32
-            && !result(
-                m,
-                "STAGING",
-                audio::set_staging_bytes(HANDLE, m.buffer_bytes),
-            )
+        if STAGING != BLOCK as u32
+            && !result(m, "STAGING", audio::set_staging_bytes(HANDLE, STAGING))
         {
             return;
         }
@@ -96,9 +93,15 @@ pub unsafe fn play(window: *mut c_void, streaming: bool, m: &mut AudioMeasuremen
         if !result(m, "START", audio::start(HANDLE)) {
             return;
         }
+        poll(m);
+        m.initial = Some(snapshot(m));
         if streaming {
+            // Start does not notify consumed inputs; leave partially read inputs alone.
             for index in 0..2 {
-                if !submit(index, m) {
+                if m.cursors[index] < m.lengths[index] {
+                    continue;
+                }
+                if !submit(index as u32, m) {
                     return;
                 }
             }
@@ -110,7 +113,11 @@ pub unsafe fn play(window: *mut c_void, streaming: bool, m: &mut AudioMeasuremen
 
 unsafe fn submit(index: u32, m: &mut AudioMeasurements) -> bool {
     unsafe {
-        if !result(m, "SUBMIT", audio::submit(HANDLE, index, m.buffer_bytes)) {
+        let start = runtime::micros();
+        let ok = audio::submit(HANDLE, index, m.buffer_bytes);
+        m.submit_us = runtime::micros().wrapping_sub(start);
+        m.max_submit_us = m.max_submit_us.max(m.submit_us);
+        if !result(m, "SUBMIT", ok) {
             return false;
         }
         m.submitted[index as usize] = m.submitted[index as usize].wrapping_add(1);
@@ -120,6 +127,9 @@ unsafe fn submit(index: u32, m: &mut AudioMeasurements) -> bool {
 
 pub unsafe fn event(msg: &peg::Message, m: &mut AudioMeasurements) {
     unsafe {
+        if msg.kind != audio::PM_AUDIO {
+            return;
+        }
         m.events = m.events.wrapping_add(1);
         m.last_kind = msg.kind;
         m.last_param = msg.param;
@@ -158,6 +168,23 @@ pub unsafe fn poll(m: &mut AudioMeasurements) {
             words.add(0x2c / 4).read_volatile(),
         ];
         m.cursors = audio::cursors(HANDLE);
+        m.active = words.add(0x5c / 4).read_volatile();
+        m.lengths = [
+            words.add(0x48 / 4).read_volatile(),
+            words.add(0x54 / 4).read_volatile(),
+        ];
+    }
+}
+
+fn snapshot(m: &AudioMeasurements) -> AudioSnapshot {
+    AudioSnapshot {
+        active: m.active,
+        cursors: m.cursors,
+        lengths: m.lengths,
+        bytes: m.bytes,
+        param: m.last_param,
+        data: m.last_data,
+        submit_us: m.submit_us,
     }
 }
 
@@ -177,8 +204,14 @@ pub unsafe fn maintain(window: *mut c_void, m: &mut AudioMeasurements) {
             timeout,
         ) {
             let restarts = m.restarts.saturating_add(1);
+            let stalled = m.stalled.unwrap_or_else(|| snapshot(m));
+            let initial = m.initial;
+            let max_submit_us = m.max_submit_us;
             play(window, true, m);
             m.restarts = restarts;
+            m.initial = initial;
+            m.stalled = Some(stalled);
+            m.max_submit_us = m.max_submit_us.max(max_submit_us);
         }
     }
 }
@@ -203,7 +236,7 @@ pub unsafe fn change_buffer(larger: bool, m: &mut AudioMeasurements) {
     let next = if larger {
         (m.buffer_bytes * 2).min(BLOCK as u32)
     } else {
-        (m.buffer_bytes / 2).max(2048)
+        (m.buffer_bytes / 2).max(STAGING)
     };
     if next != m.buffer_bytes && unsafe { stop(m) } {
         *m = AudioMeasurements {
