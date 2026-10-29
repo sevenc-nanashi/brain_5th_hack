@@ -7,3 +7,13 @@ description = "Experimental no_std APIs for fifth-generation Sharp Brain apps"
 [features]
 experimental-runtime = []
 experimental-peg = []
+
+alloc = ["experimental-runtime"]
+application = ["alloc", "experimental-peg", "dep:reflex-macros"]
+text = []
+panic-screen = ["text"]
+panic-qr = ["panic-screen", "dep:qrcodegen-no-heap"]
+
+[dependencies]
+reflex-macros = { path = "../reflex-macros", optional = true }
+qrcodegen-no-heap = { version = "1.8.1", optional = true, default-features = false }

@@ -11,6 +11,8 @@ static mut HANDLE: audio::Handle = ptr::null_mut();
 static mut STARTED: bool = false;
 static mut MAX_FILL_US: u64 = 0;
 static mut SUBMITS: u32 = 0;
+static mut WATCHDOG: audio::StreamWatchdog = audio::StreamWatchdog::new();
+static mut LAST_POLL_US: u64 = 0;
 
 unsafe fn fill(index: usize) -> bool {
     unsafe {
@@ -34,6 +36,11 @@ unsafe fn fill(index: usize) -> bool {
 
 pub unsafe fn init(window: *mut c_void) -> bool {
     unsafe {
+        assert!(HANDLE.is_null());
+        MAX_FILL_US = 0;
+        SUBMITS = 0;
+        WATCHDOG = audio::StreamWatchdog::new();
+        LAST_POLL_US = runtime::micros();
         HANDLE = audio::open_playback();
         if HANDLE.is_null() {
             return false;
@@ -66,6 +73,33 @@ pub unsafe fn init(window: *mut c_void) -> bool {
         }
         // Start synchronously consumes both blocks, without sending refill events.
         refill(0) && refill(1)
+    }
+}
+
+pub unsafe fn reset(window: *mut c_void) -> bool {
+    unsafe { shutdown() && init(window) }
+}
+
+pub unsafe fn maintain(window: *mut c_void) -> bool {
+    unsafe {
+        let now = runtime::micros();
+        if HANDLE.is_null() || now.wrapping_sub(LAST_POLL_US) < 250_000 {
+            return true;
+        }
+        LAST_POLL_US = now;
+        let mut status = audio::Status::default();
+        if !audio::status(HANDLE, &mut status) {
+            WATCHDOG = audio::StreamWatchdog::new();
+            return true;
+        }
+        let stalled = (&mut *ptr::addr_of_mut!(WATCHDOG)).stalled(
+            audio::cursors(HANDLE),
+            status.byte_position,
+            BYTES,
+            now,
+            1_000_000,
+        );
+        !stalled || reset(window)
     }
 }
 

@@ -1,12 +1,14 @@
 use brain_inspector::AudioMeasurements;
 use core::{ffi::c_void, ptr};
-use reflex::{audio, peg};
+use reflex::{audio, peg, runtime};
 
 const BLOCK: usize = 32768;
 static mut TONE: [[i16; BLOCK / 2]; 2] = [[0; BLOCK / 2]; 2];
 static mut HANDLE: audio::Handle = ptr::null_mut();
 static mut CONFIGURED: bool = false;
 static mut STARTED: bool = false;
+static mut WATCHDOG: audio::StreamWatchdog = audio::StreamWatchdog::new();
+static mut AUTO_RESTART: bool = false;
 
 fn result(m: &mut AudioMeasurements, call: &'static str, ok: bool) -> bool {
     m.call = call;
@@ -16,6 +18,8 @@ fn result(m: &mut AudioMeasurements, call: &'static str, ok: bool) -> bool {
 
 pub unsafe fn stop(m: &mut AudioMeasurements) -> bool {
     unsafe {
+        AUTO_RESTART = false;
+        WATCHDOG = audio::StreamWatchdog::new();
         if HANDLE.is_null() {
             return true;
         }
@@ -100,6 +104,7 @@ pub unsafe fn play(window: *mut c_void, streaming: bool, m: &mut AudioMeasuremen
             }
         }
         poll(m);
+        AUTO_RESTART = streaming;
     }
 }
 
@@ -152,10 +157,29 @@ pub unsafe fn poll(m: &mut AudioMeasurements) {
             words.add(0x20 / 4).read_volatile(),
             words.add(0x2c / 4).read_volatile(),
         ];
-        m.cursors = [
-            words.add(0x4c / 4).read_volatile(),
-            words.add(0x58 / 4).read_volatile(),
-        ];
+        m.cursors = audio::cursors(HANDLE);
+    }
+}
+
+pub unsafe fn maintain(window: *mut c_void, m: &mut AudioMeasurements) {
+    unsafe {
+        poll(m);
+        if !AUTO_RESTART || !m.ok || !m.status_ok {
+            WATCHDOG = audio::StreamWatchdog::new();
+            return;
+        }
+        let timeout = (u64::from(m.buffer_bytes) * 4 * 1_000_000 / (11025 * 4)).max(1_000_000);
+        if (&mut *ptr::addr_of_mut!(WATCHDOG)).stalled(
+            m.cursors,
+            m.bytes,
+            m.buffer_bytes,
+            runtime::micros(),
+            timeout,
+        ) {
+            let restarts = m.restarts.saturating_add(1);
+            play(window, true, m);
+            m.restarts = restarts;
+        }
     }
 }
 

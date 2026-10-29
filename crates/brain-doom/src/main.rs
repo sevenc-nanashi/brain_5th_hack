@@ -39,6 +39,9 @@ static mut FPS: u32 = 0;
 static mut FAILED: bool = false;
 static mut HELP: bool = false;
 static mut HELP_STARTED_US: u64 = 0;
+static mut HELP_DRAW_US: u64 = 0;
+static mut AUDIO_RESET_HELD: bool = false;
+static mut AUDIO_RESET_DONE: bool = false;
 static mut FUNCTION_KEYS: [i32; 6] = [0; 6];
 static mut VOLUME_KEYS: u8 = 0;
 static mut FRAME: [u16; display::WIDTH * display::HEIGHT] = [0; display::WIDTH * display::HEIGHT];
@@ -145,6 +148,10 @@ unsafe extern "C" fn message(window: *mut c_void, message: *const peg::Message) 
                     return 0;
                 }
                 let pressed = msg.kind != peg::PM_KEY_UP;
+                let reset_key = matches!(msg.param, 0x52 | 0x72);
+                if reset_key && !pressed {
+                    AUDIO_RESET_HELD = false;
+                }
                 if pressed
                     && FAILED
                     && (msg.param == b'q' as u16
@@ -189,6 +196,17 @@ unsafe extern "C" fn message(window: *mut c_void, message: *const peg::Message) 
                 if HELP && pressed {
                     if matches!(msg.param, peg::key::BACKSPACE | peg::key::ESCAPE) {
                         toggle_help();
+                    } else if reset_key && !AUDIO_RESET_HELD {
+                        AUDIO_RESET_HELD = true;
+                        if !audio::reset(window) {
+                            FAILED = true;
+                            audio::shutdown();
+                            failure_screen();
+                            return 0;
+                        }
+                        AUDIO_RESET_DONE = true;
+                        render_frame();
+                        draw(window, window.cast::<u8>().add(0x0c).cast());
                     }
                     return 0;
                 }
@@ -212,7 +230,22 @@ unsafe extern "C" fn message(window: *mut c_void, message: *const peg::Message) 
                 return 0;
             }
             peg::PM_TIMER if msg.param == TIMER as u16 => {
-                if FAILED || HELP {
+                if FAILED {
+                    return 0;
+                }
+                if STARTED && !audio::maintain(window) {
+                    FAILED = true;
+                    audio::shutdown();
+                    failure_screen();
+                    return 0;
+                }
+                if HELP {
+                    let now = runtime::micros();
+                    if now.wrapping_sub(HELP_DRAW_US) >= 1_000_000 {
+                        HELP_DRAW_US = now;
+                        render_frame();
+                        draw(window, window.cast::<u8>().add(0x0c).cast());
+                    }
                     return 0;
                 }
                 let elapsed = runtime::micros().wrapping_sub(START_US);
@@ -282,6 +315,7 @@ unsafe fn render_frame() {
             help::paint(frame);
             let (mix_ms, state, submits) = audio::diagnostics();
             help::audio_status(frame, mix_ms, state, submits);
+            help::audio_reset(frame, AUDIO_RESET_DONE);
         } else {
             help::performance(frame, FPS, audio::max_fill_ms());
         }
@@ -293,6 +327,8 @@ unsafe fn toggle_help() {
         HELP = !HELP;
         if HELP {
             HELP_STARTED_US = runtime::micros();
+            HELP_DRAW_US = HELP_STARTED_US;
+            AUDIO_RESET_DONE = false;
         } else {
             START_US = START_US.wrapping_add(runtime::micros().wrapping_sub(HELP_STARTED_US));
             FPS_STARTED_US = 0;

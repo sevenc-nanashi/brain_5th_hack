@@ -1,6 +1,22 @@
 //! Experimental V690_H1 PCM playback. See docs/audio.md for firmware evidence.
 use core::ffi::c_void;
 
+mod watchdog;
+pub use watchdog::StreamWatchdog;
+
+/// Input buffer cursors used by the V690_H1 PCM service.
+/// # Safety
+/// Requires an open, configured V690_H1 handle. These are firmware-private fields.
+pub unsafe fn cursors(handle: Handle) -> [u32; 2] {
+    unsafe {
+        let words = handle.cast::<u32>();
+        [
+            words.add(0x4c / 4).read_volatile(),
+            words.add(0x58 / 4).read_volatile(),
+        ]
+    }
+}
+
 pub type Handle = *mut c_void;
 pub const PM_AUDIO: u16 = 0x107;
 /// `MessageData::ext_params[0]` identifies the consumed buffer (0 or 1).

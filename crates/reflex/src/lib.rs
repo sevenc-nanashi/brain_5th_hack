@@ -21,3 +21,20 @@ pub mod audio;
     target_os = "none"
 ))]
 pub mod runtime;
+
+#[cfg(feature = "application")]
+pub use reflex_macros::main;
+
+pub mod application;
+pub use application::{Action, Application, Event, TouchPhase};
+
+#[cfg(feature = "panic-screen")]
+pub mod panic_screen;
+#[cfg(feature = "text")]
+pub mod text;
+
+#[cfg(all(feature = "alloc", target_arch = "arm", target_os = "none"))]
+pub mod allocator;
+#[cfg(all(feature = "application", target_arch = "arm", target_os = "none"))]
+#[doc(hidden)]
+pub mod lifecycle;

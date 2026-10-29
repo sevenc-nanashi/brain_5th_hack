@@ -66,6 +66,12 @@ PEG の関数呼び出しは V690_H1 未照合のため `experimental-peg` featu
 使い方と確認状況は [Reflex の README](crates/reflex/README.md) を参照。
 音声 API の静的解析結果と未確定事項は [docs/audio.md](docs/audio.md) を参照。
 
+## brain-calculator
+
+`alloc`・`#[reflex::main]`・QR付きpanic画面を使う関数電卓。
+`make calculator`でSD用アプリ、`make calculator-preview`でPC用描画プレビューを生成する。
+計算規則・操作・実機確認項目は [関数電卓](docs/calculator.md) を参照。
+
 ## brain-hello-world
 
 第5世代 Brain の追加アプリとして白背景に `Hello world!` を表示する Rust の試作。

@@ -2,7 +2,8 @@
 
 第5世代 Sharp Brain 向けの `no_std` Rust crate。crate 名は `reflex`。
 解析ツールとは独立し、アプリから使う描画・終了・PEG の ABI 定義をまとめる。
-外部依存・アロケーター・書き込み可能な static は持たない。
+デフォルトでは外部依存・アロケーター・書き込み可能な static は持たない。
+`application` featureで、追跡型アロケーターとPEGイベント型アプリの実行基盤を有効にできる。
 
 ## 利用
 
@@ -14,13 +15,13 @@ crates.io への公開はしていない。
 reflex = { path = "../reflex" }
 ```
 
-| モジュール | 内容 | 確認状況 |
-| --- | --- | --- |
-| `app` | 起動コンテキスト、`exit` | V690_H1 の純正アプリと SharpLib で終了経路を確認 |
-| `display` | 854×480 RGB565、回転座標、ピクセル書き込み、キャッシュ同期、表示更新 | 既存 Hello World の処理を移植、実機確認が必要 |
-| `peg` | キー・タッチ・タイマーのメッセージ、描画用 ABI 型・vtable スロット | Brain Hackers の公開サンプルに基づく、V690_H1 未照合 |
-| `runtime` | malloc / free、TSTMR 時刻 | `experimental-runtime` が必要。malloc/free の公開入口を V690_H1 で確認 |
-| `audio` | PCM 再生、消費通知、補充、停止・状態取得 | `experimental-runtime` が必要。V690_H1 静的解析に基づく、実機未確認 |
+| モジュール | 内容                                                                     | 確認状況                                                                    |
+| ---------- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
+| `app`      | 起動コンテキスト、`exit`                                                 | V690_H1 の純正アプリと SharpLib で終了経路を確認                            |
+| `display`  | 854×480 RGB565、回転座標、ピクセル書き込み、キャッシュ同期、表示更新     | 既存 Hello World の処理を移植、実機確認が必要                               |
+| `peg`      | キー・タッチ・タイマーのメッセージ、描画用 ABI 型・vtable スロット       | Brain Hackers の公開サンプルに基づく、V690_H1 未照合                        |
+| `runtime`  | malloc / free、TSTMR 時刻                                                | `experimental-runtime` が必要。malloc/free の公開入口を V690_H1 で確認      |
+| `audio`    | PCM 再生、消費通知、補充、停止・状態取得                                 | `experimental-runtime` が必要。V690_H1 静的解析に基づく、実機未確認         |
 | `peg::raw` | ウィンドウ生成、画面矩形、描画、フォーカス、タイマー、破棄の関数ポインタ | `experimental-peg` が必要。一部を純正アプリの公開入口へ照合済み、実機未確認 |
 
 デバイスを操作する API は `arm` + `target_os = "none"` でのみ公開する。
@@ -49,29 +50,29 @@ unsafe {
 `peg::Message` は `repr(C)`、データ部分は C と同じ union。
 未知のメッセージも受け取れるよう、種別とキーコードは整数のまま保持する。
 
-| `message.kind` | ペイロード |
-| --- | --- |
-| `PM_KEY` + `param == TOUCH_MOVE_PARAM` | タッチ移動。`data.point` が座標（PW-H1実機報告） |
-| `PM_KEY` / `PM_KEY_DOWN` | `param` がキーコード、`data.ext_params[0]` が修飾・押下フラグ |
-| `PM_KEY_UP` | キー解放の候補値。元資料でも未確定 |
-| `PM_LBUTTONDOWN` / `PM_LBUTTONUP` | `data.point` がタッチ座標 |
-| `PM_TIMER` | `param` がタイマー ID |
+| `message.kind`                         | ペイロード                                                    |
+| -------------------------------------- | ------------------------------------------------------------- |
+| `PM_KEY` + `param == TOUCH_MOVE_PARAM` | タッチ移動。`data.point` が座標（PW-H1実機報告）              |
+| `PM_KEY` / `PM_KEY_DOWN`               | `param` がキーコード、`data.ext_params[0]` が修飾・押下フラグ |
+| `PM_KEY_UP`                            | キー解放の候補値。元資料でも未確定                            |
+| `PM_LBUTTONDOWN` / `PM_LBUTTONUP`      | `data.point` がタッチ座標                                     |
+| `PM_TIMER`                             | `param` がタイマー ID                                         |
 
 `peg::key` に Enter、Escape、Space、Backspace、矢印、Shift と以下の特殊キーを定義。
-PW-H1 の実機報告に基づく対応表（`INPUT_MODE` は「音声」の次の連番と解釈した暫定値）。
+PW-H1 の実機報告に基づく対応表。
 
-| 定数 | コード | キー |
-| --- | --- | --- |
-| `PAGE_UP` | `0x025c` | PageUp（二重上）、Shift で音量プラス |
-| `PAGE_DOWN` | `0x025d` | PageDown（二重下）、Shift で音量マイナス |
-| `HOME` | `0x028a` | ホーム |
-| `JAPANESE_DICTIONARY` | `0x028b` | 国語/漢字 |
-| `ENGLISH_DICTIONARY` | `0x028c` | 英和/和英 |
-| `MY_DICTIONARY` | `0x028d` | My辞書 |
-| `HISTORY` | `0x028e` | 履歴 |
-| `SELECT_FROM_LIST` | `0x028f` | 一覧から選ぶ |
-| `AUDIO` | `0x0294` | 音声 |
-| `INPUT_MODE` | `0x0295` | あA1/記号（暫定） |
+| 定数                  | コード   | キー                                     |
+| --------------------- | -------- | ---------------------------------------- |
+| `PAGE_UP`             | `0x025c` | PageUp（二重上）、Shift で音量プラス     |
+| `PAGE_DOWN`           | `0x025d` | PageDown（二重下）、Shift で音量マイナス |
+| `HOME`                | `0x028a` | ホーム                                   |
+| `JAPANESE_DICTIONARY` | `0x028b` | 国語/漢字                                |
+| `ENGLISH_DICTIONARY`  | `0x028c` | 英和/和英                                |
+| `MY_DICTIONARY`       | `0x028d` | My辞書                                   |
+| `HISTORY`             | `0x028e` | 履歴                                     |
+| `SELECT_FROM_LIST`    | `0x028f` | 一覧から選ぶ                             |
+| `AUDIO`               | `0x0294` | 音声                                     |
+| `INPUT_MODE`          | `0x0295` | あA1/記号                                |
 
 音量操作は `PAGE_UP` / `PAGE_DOWN` と `KMOD_SHIFT` の組み合わせとして扱う。
 PW-H1 の実機報告に合わせ、上は `0x25e`、左は `0x260` とする（参考サンプルのラベルを訂正）。
@@ -129,3 +130,65 @@ ARM ビルド時に起動コンテキスト・メッセージ・Bitmap のサイ
 ## 命名
 
 腕（ARM）に熱湯とかをかけると脳（Brain）で意識する前に動かすのを逃避反射（Withdrawal Reflex）というらしいので、それのReflexの部分。
+
+## `#[reflex::main]` と alloc
+
+```toml
+reflex = { path = "../reflex", features = ["application", "panic-qr"] }
+```
+
+```rust,ignore
+#![no_std]
+#![no_main]
+extern crate alloc;
+
+#[reflex::main]
+fn main() -> Calculator {
+    Calculator::new()
+}
+
+impl reflex::Application for Calculator {
+    fn event(&mut self, event: reflex::Event) -> reflex::Action {
+        // 入力を処理し、None / Redraw / Exitを返す。
+        reflex::Action::Redraw
+    }
+    fn draw(&self, pixels: &mut [u16]) {
+        // 854×480、行優先のRGB565を描画する。
+    }
+}
+```
+
+マクロは引数なしの同期関数へ付ける。戻り値は `Application + 'static`。
+mainから戻ることは終了を意味しない。reflexが状態と描画バッファを所有して
+PEGへ戻り、キー・タッチを配送する。終了は `Action::Exit` を返す。
+`Action::None`と未知のPEGメッセージは元のウィンドウハンドラーへ渡す。
+`Event::Key`は生のキーコード・押下/解放・フラグを保持するため、
+PM_KEYとPM_KEY_DOWNの重複除去はアプリ側で行う。
+
+起動コードは `.data` / `.bss` を初期化する。リンクには `crates/reflex/link.x` を使う。
+コードの先頭は `0x90000000`、RAM初期値は `0x90500000`。
+マクロはグローバルアロケーターとpanic handlerも定義するため、アプリ側で重複定義しない。
+実装例は [関数電卓](../brain-calculator/src/main.rs)、ビルド例は `make calculator`。
+
+正常終了では、受付停止・フォーカス復元・元vtable復元・ウィンドウ破棄を行い、
+アプリ状態と描画バッファをdropしてから、Rustアロケーターに残る確保領域を一括解放する。
+最後に元の起動コンテキストで終了通知する。所有値のDropで外部リソースも解放すること。
+アプリは独自の外部コールバックを登録したまま終了してはいけない。
+一括解放はDropを実行せず、`runtime::alloc`の直接呼び出しは追跡しない。
+既存の低レベル `app::exit` は自動解放を行わない。
+
+`alloc` featureだけで `allocator::SystemAllocator` を使うこともできる。
+これは単一コアのPEGスレッド向けで、割り込みハンドラーや複数コアからは使用しない。
+ヘッダーは元ポインタと前後のリンクの3ポインタ分、加えて整列の余白を消費する。
+`release_all` は全所有値の破棄とコールバック停止後に限るunsafe API。
+起動用staticと割り込みの初期化は、手動登録する側が保証する。
+
+`panic-screen`はヒープなしで文字を描画してspinし、`panic-qr`はさらにQRを表示する。
+両方無効なら従来どおりspinだけを行う。panic時は一括解放・終了通知を行わない。
+診断は最大192 UTF-8バイトで、切り詰めを `...` として表示する。
+QRはVersion 10・誤り訂正M以下、固定バッファと4モジュールの余白で生成する。
+ASCII以外の画面文字は `?` で表示し、QRにはUTF-8を保持する。
+画面保持、watchdog、実機でのQR読取、PEG破棄・再入は実機検証が必要。
+
+`text` featureのASCIIアトラスは既存DoomのDejaVu Sans Mono画像を再利用したもの。
+アプリ配布時は `assets/FONT-LICENSE.txt` を同梱する。

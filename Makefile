@@ -35,3 +35,16 @@ inspector:
 	mkdir -p $(INSPECTOR_DIR)
 	$(OBJCOPY) -O binary $(BUILD_DIR)/armv7a-none-eabi/release/brain-inspector $(INSPECTOR_DIR)/AppMain.bin
 	touch $(INSPECTOR_DIR)/index.din
+
+CALCULATOR_DIR = $(BUILD_DIR)/calculator/APP/Calculator
+
+.PHONY: calculator calculator-preview
+calculator:
+	$(CARGO) rustc -p brain-calculator --bin brain-calculator --features device --release --target armv7a-none-eabi --target-dir $(BUILD_DIR) -- -C panic=abort -C target-cpu=cortex-a7 -C relocation-model=static -C link-arg=-Tcrates/reflex/link.x -C link-arg=--no-undefined
+	mkdir -p $(CALCULATOR_DIR)
+	$(OBJCOPY) -O binary $(BUILD_DIR)/armv7a-none-eabi/release/brain-calculator $(CALCULATOR_DIR)/AppMain.bin
+	touch $(CALCULATOR_DIR)/index.din
+	cp crates/reflex/assets/FONT-LICENSE.txt $(CALCULATOR_DIR)/FONT-LICENSE.txt
+
+calculator-preview:
+	$(CARGO) run -p brain-calculator --example preview --target-dir $(BUILD_DIR) -- $(BUILD_DIR)/calculator-preview

@@ -1,0 +1,15 @@
+[package]
+name = "brain-calculator"
+version = "0.1.0"
+edition.workspace = true
+
+[features]
+device = ["reflex/application"]
+
+[dependencies]
+reflex = { path = "../reflex", features = ["text", "panic-qr"] }
+libm = "0.2.16"
+
+[[bin]]
+name = "brain-calculator"
+required-features = ["device"]

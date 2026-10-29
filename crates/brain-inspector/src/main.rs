@@ -234,7 +234,7 @@ unsafe extern "C" fn message(window: *mut c_void, message: *const peg::Message) 
             }
             peg::PM_TIMER if msg.param == TIMER as u16 => {
                 let mut m = MEASUREMENTS.unwrap();
-                audio::poll(&mut m.audio);
+                audio::maintain(window, &mut m.audio);
                 MEASUREMENTS = Some(m);
                 sample();
                 present(window, window.cast::<u8>().add(0x0c).cast());

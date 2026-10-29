@@ -48,3 +48,15 @@ pub unsafe fn micros() -> u64 {
         (u64::from(high) << 32) | u64::from(low)
     }
 }
+
+/// Mask interrupts only while changing allocator bookkeeping.
+#[cfg(feature = "alloc")]
+pub(crate) unsafe fn critical_section<R>(operation: impl FnOnce() -> R) -> R {
+    unsafe {
+        let saved: u32;
+        asm!("mrs {saved}, cpsr", "cpsid if", saved = out(reg) saved, options(nostack, preserves_flags));
+        let result = operation();
+        asm!("msr cpsr_c, {saved}", saved = in(reg) saved, options(nostack, preserves_flags));
+        result
+    }
+}

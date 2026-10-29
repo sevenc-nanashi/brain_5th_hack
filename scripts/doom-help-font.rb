@@ -11,3 +11,5 @@ data, error, status = Open3.capture3('convert', '-size', '12x2470', 'xc:black',
 abort error unless status.success?
 raise 'Unexpected atlas size' unless data.bytesize == 95 * 12 * 26
 File.binwrite(File.expand_path('../crates/brain-doom/assets/help-font.gray', __dir__), data)
+
+File.binwrite(File.expand_path('../crates/reflex/assets/ascii.gray', __dir__), data)

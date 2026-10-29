@@ -41,7 +41,7 @@ pub fn paint(pixels: &mut [u16]) {
         "",
     ];
     for (row, (a, b)) in left.iter().zip(right).enumerate() {
-        text(pixels, 48, 100 + row * 30, a, 0xffff);
+        text(pixels, 48, 100 + row * 29, a, 0xffff);
         text(pixels, 416, 104 + row * 32, b, 0xffff);
     }
     text(pixels, 48, 420, "F12 / Del: Close", 0x9e7f);
@@ -65,7 +65,21 @@ fn text(pixels: &mut [u16], x: usize, y: usize, value: &str, color: u16) {
     }
 }
 
-/// Snapshot when opening help: maximum synthesis time, driver state and refills.
+pub fn audio_reset(pixels: &mut [u16], done: bool) {
+    text(
+        pixels,
+        48,
+        392,
+        if done {
+            "R: Reset audio (OK)"
+        } else {
+            "R: Reset audio"
+        },
+        0x9e7f,
+    );
+}
+
+/// Maximum synthesis time, driver state and refills since the last audio init.
 pub fn audio_status(pixels: &mut [u16], mix_ms: u32, state: Option<u32>, submits: u32) {
     text(pixels, 416, 392, "Mix ms:", 0x9e7f);
     number(pixels, 512, 392, mix_ms);

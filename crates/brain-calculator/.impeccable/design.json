@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 2,
+  "title": "Design System: 関数電卓",
+  "extensions": {
+    "native": {
+      "platform": "PW-H1 RGB565",
+      "viewport": [800, 480],
+      "framebuffer": [854, 480],
+      "colors": {
+        "BG": { "rgb565": "0xf7bd", "rgb": "#f6f6ee" },
+        "INK": { "rgb565": "0x18e3", "rgb": "#181c18" },
+        "MUTED": { "rgb565": "0x4a69", "rgb": "#4a4c4a" },
+        "ACCENT": { "rgb565": "0x1b89", "rgb": "#18714a" },
+        "ERROR": { "rgb565": "0xa900", "rgb": "#ac2000" },
+        "FUNCTION": { "rgb565": "0xe734", "rgb": "#e6e6a4" },
+        "OPERATOR": { "rgb565": "0xdedb", "rgb": "#dedade" },
+        "white": { "rgb565": "0xffff", "rgb": "#ffffff" }
+      },
+      "glyph": [12, 26],
+      "resultScale": 2,
+      "resultGlyph": [24, 52],
+      "layout": {
+        "unit": "pixel",
+        "display": { "origin": [16, 54], "size": [768, 100] },
+        "buttons": {
+          "origin": [16, 164],
+          "columns": 8,
+          "rows": 5,
+          "size": [90, 56],
+          "step": [96, 62],
+          "gap": [6, 6]
+        },
+        "historyRows": { "origin": [16, 84], "size": [768, 66], "stepY": 72, "count": 5 },
+        "historyNavigation": { "x": [354, 498, 666], "y": 16, "size": [118, 42] }
+      },
+      "focus": "濃色2ピクセルと白2ピクセルの二重枠",
+      "verification": "ホストプレビュー確認済み、実機未確認"
+    }
+  },
+  "narrative": {
+    "overview": "白系の面と濃い文字を使う、854×480のネイティブRGB565バッファの左側800×480を使用する画面。式・結果の表示領域と8列×5行のボタンを分け、履歴は別画面に置く。Web/iOS/AndroidのUIではない。"
+  }
+}

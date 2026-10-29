@@ -44,6 +44,7 @@ pub struct AudioMeasurements {
     pub submitted: [u32; 2],
     pub staging: [u32; 2],
     pub cursors: [u32; 2],
+    pub restarts: u32,
 }
 
 impl Default for AudioMeasurements {
@@ -67,6 +68,7 @@ impl Default for AudioMeasurements {
             submitted: [0; 2],
             staging: [0; 2],
             cursors: [0; 2],
+            restarts: 0,
         }
     }
 }
@@ -185,7 +187,12 @@ pub fn render(pixels: &mut [u16], m: &Measurements, edge: usize, input: &Input) 
         c.at(28, 278, 0xffff);
         write!(c, "STAGING {} {}", a.staging[0], a.staging[1]).unwrap();
         c.at(28, 310, 0xffff);
-        write!(c, "CURSOR {} {}", a.cursors[0], a.cursors[1]).unwrap();
+        write!(
+            c,
+            "CURSOR {} {}  RESTART {}",
+            a.cursors[0], a.cursors[1], a.restarts
+        )
+        .unwrap();
         c.at(28, 338, 0xffe0);
         write!(
             c,
