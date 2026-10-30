@@ -22,7 +22,7 @@ SECTIONS {
         . = ALIGN(16);
         __bss_end = .;
     } > APP
-    /DISCARD/ : { *(.ARM.exidx*) *(.ARM.extab*) *(.comment) }
+    /DISCARD/ : { *(.ARM.exidx*) *(.ARM.extab*) *(.eh_frame*) *(.comment) }
 }
 ASSERT(_start == 0x90000000, "AppMain.bin must start at the ARM entry point")
 ASSERT(LOADADDR(.data) + SIZEOF(.data) <= 0x90500000, "Loaded image overlaps app data")

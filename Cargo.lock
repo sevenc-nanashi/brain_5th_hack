@@ -74,6 +74,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "brain-browser"
+version = "0.1.0"
+dependencies = [
+ "reflex",
+]
+
+[[package]]
 name = "brain-calculator"
 version = "0.1.0"
 dependencies = [

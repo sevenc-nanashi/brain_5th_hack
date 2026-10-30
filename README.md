@@ -16,6 +16,7 @@ Brainの第5世代（PW-x1）で遊ぼう！
 | [brain-inspector](crates/brain-inspector/README.md)       | 画面・入力・音声の計測アプリ                             |
 | [brain-explorer](crates/brain-explorer/README.md) | フォルダー移動・ファイル内容の閲覧 |
 | [brain-usb-probe](crates/brain-usb-probe/README.md) | USB通信・再送の実験的な疎通確認 |
+| [brain-browser](crates/brain-browser/README.md) | NetSurf・美咲フォント・USB経由のHTTP(S)ブラウザ |
 
 コマンドはリポジトリのルートで実行する。各 crate の使い方・ビルド手順はリンク先を参照。
 
