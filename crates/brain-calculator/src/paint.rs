@@ -1,4 +1,6 @@
-use crate::{BUTTON_PITCH, BUTTON_WIDTH, BUTTONS, Calculator, UI_WIDTH, format_result};
+use crate::{
+    BUTTON_PITCH, BUTTON_WIDTH, BUTTONS, Calculator, NUMERIC_KEYS, UI_WIDTH, format_result,
+};
 use alloc::format;
 use reflex::{
     display::{HEIGHT, WIDTH},
@@ -14,6 +16,25 @@ const OPERATOR: u16 = 0xdedb;
 
 struct Canvas<'a>(&'a mut [u16]);
 impl Canvas<'_> {
+    fn binding(&mut self, x: usize, y: usize, key: u8, fg: u16, bg: u16) {
+        let mut glyph = [bg; text::CELL_WIDTH * text::CELL_HEIGHT];
+        let bytes = [key];
+        text::draw(
+            |x, y, color| glyph[y * text::CELL_WIDTH + x] = color,
+            0,
+            0,
+            core::str::from_utf8(&bytes).unwrap(),
+            fg,
+            bg,
+            1,
+        );
+        for dy in 0..20 {
+            for dx in 0..9 {
+                self.0[(y + dy) * WIDTH + x + dx] = glyph
+                    [(dy * text::CELL_HEIGHT / 20) * text::CELL_WIDTH + dx * text::CELL_WIDTH / 9];
+            }
+        }
+    }
     fn rect(&mut self, x: usize, y: usize, w: usize, h: usize, color: u16) {
         for row in y..(y + h).min(HEIGHT) {
             if x < UI_WIDTH {
@@ -101,6 +122,14 @@ pub fn draw(app: &Calculator, pixels: &mut [u16]) {
         }
         return;
     }
+    c.text(
+        480,
+        16,
+        if app.numeric_input { "123" } else { "ABC" },
+        ACCENT,
+        BG,
+        1,
+    );
     c.text(606, 16, app.angle.label(), ACCENT, BG, 1);
     c.text(666, 16, &format!("H{:02}", app.history.len()), MUTED, BG, 1);
     c.rect(16, 54, UI_WIDTH - 32, 100, 0xffff);
@@ -143,6 +172,11 @@ pub fn draw(app: &Calculator, pixels: &mut [u16]) {
             c.rect(x + 4, y + 4, BUTTON_WIDTH - 8, 48, bg);
         }
         let label = if index == 6 { app.angle.label() } else { label };
+        let shortcut = if app.numeric_input {
+            NUMERIC_KEYS.iter().find(|&&(_, button)| button == index)
+        } else {
+            None
+        };
         c.text(
             x + (BUTTON_WIDTH - label.len() * 12) / 2,
             y + 15,
@@ -151,5 +185,14 @@ pub fn draw(app: &Calculator, pixels: &mut [u16]) {
             bg,
             1,
         );
+        if let Some(&(key, _)) = shortcut {
+            c.binding(
+                x + BUTTON_WIDTH - 16,
+                y + 32,
+                key,
+                if bg == ACCENT { 0xffff } else { MUTED },
+                bg,
+            );
+        }
     }
 }

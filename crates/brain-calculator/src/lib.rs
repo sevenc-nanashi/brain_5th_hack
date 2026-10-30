@@ -20,6 +20,27 @@ const UI_WIDTH: usize = 800;
 const BUTTON_PITCH: usize = (UI_WIDTH - 32) / 8;
 const BUTTON_WIDTH: usize = BUTTON_PITCH - 6;
 const HISTORY_LIMIT: usize = 32;
+const NUMERIC_KEYS: &[(u8, usize)] = &[
+    (b'Q', 32),
+    (b'W', 33),
+    (b'E', 34),
+    (b'R', 24),
+    (b'T', 25),
+    (b'Y', 26),
+    (b'U', 16),
+    (b'I', 17),
+    (b'O', 18),
+    (b'P', 36),
+    (b'A', 38),
+    (b'S', 35),
+    (b'D', 27),
+    (b'F', 19),
+    (b'G', 11),
+    (b'H', 12),
+    (b'J', 13),
+    (b'K', 37),
+    (b'L', 39),
+];
 struct Entry {
     expression: String,
     result: f64,
@@ -39,6 +60,7 @@ pub struct Calculator {
     focus: usize,
     pressed: Option<usize>,
     keys_down: [u32; 32],
+    numeric_input: bool,
 }
 impl Default for Calculator {
     fn default() -> Self {
@@ -60,6 +82,7 @@ impl Calculator {
             focus: 32,
             pressed: None,
             keys_down: [0; 32],
+            numeric_input: true,
         }
     }
     fn insert(&mut self, value: &str) {
@@ -151,7 +174,7 @@ impl Calculator {
         }
         Action::Redraw
     }
-    fn key(&mut self, code: u16) -> Action {
+    fn key(&mut self, code: u16, flags: u32) -> Action {
         use peg::key;
         if code == key::ESCAPE {
             if self.show_history {
@@ -180,16 +203,33 @@ impl Calculator {
             return Action::Redraw;
         }
         match code {
+            key::INPUT_MODE => self.numeric_input = !self.numeric_input,
             key::LEFT => self.focus = self.focus / 8 * 8 + (self.focus % 8 + 7) % 8,
             key::RIGHT => self.focus = self.focus / 8 * 8 + (self.focus % 8 + 1) % 8,
             key::UP => self.focus = (self.focus + 32) % 40,
             key::DOWN => self.focus = (self.focus + 8) % 40,
             key::ENTER => return self.activate(self.focus),
-            key::BACKSPACE => return self.activate(14),
-            0x7f => return self.activate(14),
+            key::BACKSPACE | 0x7f => {
+                return self.activate(if flags & peg::KMOD_SHIFT != 0 { 15 } else { 14 });
+            }
             0x3d => return self.activate(39),
             0x20..=0x7e => {
-                let byte = code as u8;
+                let mut byte = code as u8;
+                if self.numeric_input && byte.is_ascii_alphabetic() {
+                    let Some(&(_, index)) = NUMERIC_KEYS
+                        .iter()
+                        .find(|&&(key, _)| key == byte.to_ascii_uppercase())
+                    else {
+                        return Action::None;
+                    };
+                    return self.activate(index);
+                } else if byte.is_ascii_alphabetic() {
+                    byte = if flags & peg::KMOD_SHIFT != 0 {
+                        byte.to_ascii_uppercase()
+                    } else {
+                        byte.to_ascii_lowercase()
+                    };
+                }
                 if byte.is_ascii_alphanumeric() || b".+-*/^() ".contains(&byte) {
                     let bytes = [byte];
                     self.insert(core::str::from_utf8(&bytes).unwrap());
@@ -236,7 +276,7 @@ impl Calculator {
 impl Application for Calculator {
     fn event(&mut self, event: Event) -> Action {
         match event {
-            Event::Key { code, down, .. } => {
+            Event::Key { code, down, flags } => {
                 let word = usize::from(code) / 32;
                 if word >= self.keys_down.len() {
                     return Action::None;
@@ -250,7 +290,7 @@ impl Application for Calculator {
                     return Action::None;
                 }
                 self.keys_down[word] |= mask;
-                self.key(code)
+                self.key(code, flags)
             }
             Event::Touch { x, y, phase } => {
                 let hit = self.hit(usize::from(x), usize::from(y));

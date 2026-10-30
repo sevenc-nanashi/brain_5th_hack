@@ -49,7 +49,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     fs::create_dir_all(directory)?;
     let mut pixels = vec![0; WIDTH * HEIGHT];
     let mut app = Calculator::new();
+    key(&mut app, reflex::peg::key::INPUT_MODE);
     input(&mut app, "sin(30)+2pi=");
+    key(&mut app, reflex::peg::key::INPUT_MODE);
+    app.draw(&mut pixels);
+    save(directory, "numeric-keys.ppm", &pixels)?;
+    key(&mut app, reflex::peg::key::INPUT_MODE);
     app.draw(&mut pixels);
     save(directory, "calculator.ppm", &pixels)?;
     key(&mut app, reflex::peg::key::LEFT);

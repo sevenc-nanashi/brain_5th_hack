@@ -7,7 +7,7 @@ edition.workspace = true
 device = ["reflex/application"]
 
 [dependencies]
-reflex = { path = "../reflex", features = ["text", "panic-qr"] }
+reflex = { path = "../reflex", features = ["font-antialias", "panic-qr"] }
 libm = "0.2.16"
 
 [[bin]]
