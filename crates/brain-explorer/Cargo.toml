@@ -1,0 +1,19 @@
+[package]
+name = "brain-explorer"
+version = "0.1.0"
+edition.workspace = true
+
+[features]
+device = ["reflex/application", "reflex/panic-qr"]
+
+[dependencies]
+reflex = { path = "../reflex", features = ["text"] }
+
+[[bin]]
+name = "brain-explorer"
+required-features = ["device"]
+
+[package.metadata.reflex]
+name = "Explorer"
+output = "explorer"
+assets = ["../reflex/assets/FONT-LICENSE.txt"]

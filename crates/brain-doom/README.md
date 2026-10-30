@@ -88,7 +88,7 @@ PW-H1 の実機報告に合わせ、上を `0x25e`、左を `0x260` に修正し
 
 ## 実装
 
-起動・ウィンドウ登録・描画・終了は `#[reflex::main]` / `Application` と共通 `reflex/link.x` を使う。
+起動・ウィンドウ登録・描画・終了は `#[reflex::main]` / `Application` と `reflex-cli` 内蔵の `link.x` を使う。
 ゲーム状態は `Doom` が所有し、PEGタイマーと音声通知を `raw_event` で受け取る。
 Cエンジン用128KiBスタックの切り替えだけは `engine-stack.S` に残す。
 終了時は `can_exit` で音声停止を確認し、失敗時はアプリを保持してエラー画面へ戻る。

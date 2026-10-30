@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 2,
+  "title": "Design System: Explorer",
+  "extensions": {
+    "native": {
+      "platform": "Brain RGB565 / Reflex",
+      "viewport": [800, 480],
+      "framebuffer": [854, 480],
+      "colors": {
+        "BG": { "rgb565": "0xf7bd", "rgb": "#f6f6ee" },
+        "INK": { "rgb565": "0x18e3", "rgb": "#181c18" },
+        "MUTED": { "rgb565": "0x4a69", "rgb": "#4a4c4a" },
+        "ACCENT": { "rgb565": "0x1b89", "rgb": "#18714a" },
+        "ERROR": { "rgb565": "0xa900", "rgb": "#ac2000" },
+        "WHITE": { "rgb565": "0xffff", "rgb": "#ffffff" },
+        "LINE": { "rgb565": "0xdedb", "rgb": "#dedade" }
+      },
+      "font": "Reflex shared ASCII bitmap",
+      "glyph": [6, 13],
+      "largeGlyph": [12, 26],
+      "layout": {
+        "unit": "pixel",
+        "title": [16, 14],
+        "path": [16, 64],
+        "list": { "origin": [16, 92], "size": [760, 31], "stepY": 32, "rows": 9 },
+        "text": { "origin": [16, 86], "columns": 64, "rows": 12, "stepY": 26 },
+        "hex": { "origin": [16, 86], "bytesPerRow": 16, "rows": 16, "stepY": 18 },
+        "status": [16, 408],
+        "buttons": { "origin": [16, 426], "size": [184, 48], "stepX": 192, "count": 4 }
+      },
+      "selection": "緑地に白文字・白い輪郭アイコン",
+      "disabled": "ボタンの文字をMUTEDで表示し、押下色を付けない",
+      "verification": "共通描画のホストプレビューで一覧・TEXT・HEXを確認、実機未確認"
+    }
+  },
+  "narrative": {
+    "overview": "電卓と共通の白系の面・濃い文字・緑の選択色を使う、Brainのネイティブ画面。854×480のRGB565バッファの左側800×480を操作領域とし、ファイル一覧からテキスト／16進の内容表示へ切り替える。既存の共通ASCII bitmap fontを維持する。",
+    "dos": [
+      "既存パレット・共通フォント・固定操作領域を維持する。",
+      "一覧と内容表示を切り替え、下部4ボタンの位置を保つ。"
+    ],
+    "donts": [
+      "Web/iOS/AndroidのUI規則やCSS構成を持ち込まない。",
+      "ホストプレビューを実機確認として扱わない。"
+    ]
+  }
+}

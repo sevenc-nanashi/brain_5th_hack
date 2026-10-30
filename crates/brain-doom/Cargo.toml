@@ -22,7 +22,6 @@ required-features = ["engine"]
 [package.metadata.reflex]
 name = "Doom"
 output = "doom"
-linker = "../reflex/link.x"
 assets = ["assets/FONT-LICENSE.txt"]
 
 [package.metadata.reflex.inputs]

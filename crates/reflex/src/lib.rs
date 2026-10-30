@@ -22,6 +22,13 @@ pub mod audio;
 ))]
 pub mod runtime;
 
+#[cfg(all(
+    feature = "experimental-runtime",
+    target_arch = "arm",
+    target_os = "none"
+))]
+pub mod fs;
+
 #[cfg(feature = "application")]
 pub use reflex_macros::main;
 

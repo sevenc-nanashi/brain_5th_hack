@@ -27,7 +27,6 @@ pub mod key {
     pub const PAGE_UP: u16 = 0x25c;
     /// 二重下。Shift 有効時は音量マイナス。
     pub const PAGE_DOWN: u16 = 0x25d;
-    // PW-H1 device observation: up/left differ from event_dumper's labels.
     pub const LEFT: u16 = 0x260;
     pub const DOWN: u16 = 0x25f;
     pub const UP: u16 = 0x25e;

@@ -16,5 +16,4 @@ required-features = ["device"]
 [package.metadata.reflex]
 name = "Inspector"
 output = "inspector"
-linker = "../reflex/link.x"
 assets = ["../reflex/assets/FONT-LICENSE.txt"]

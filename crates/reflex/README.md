@@ -25,6 +25,8 @@ reflex = { path = "../reflex" }
 | `peg::raw` | ウィンドウ生成、画面矩形、描画、フォーカス、タイマー、破棄の関数ポインタ | `experimental-peg` が必要。一部を純正アプリの公開入口へ照合済み、実機未確認 |
 
 デバイスを操作する API は `arm` + `target_os = "none"` でのみ公開する。
+`fs` は読み取り専用の `File` / `Directory` を提供する（`experimental-runtime`）。
+V690_H1 の静的解析に基づき、実機未確認。ABI の根拠と制限は [ファイル操作 API](../../docs/filesystem.md) を参照。
 音声 ABI と内部バッファ長の変更に関する制約は [音声解析メモ](../../docs/audio.md) を参照。
 型・定数・座標変換はホストでも使える。ポインターを含む ABI 型の配置は
 32-bit ARM 用であり、64-bit ホストのメモリをそのままデバイスへ送ってはいけない。
@@ -167,7 +169,7 @@ PEGへ戻り、キー・タッチを配送する。終了は `Action::Exit` を�
 `Event::Key`は生のキーコード・押下/解放・フラグを保持するため、
 PM_KEYとPM_KEY_DOWNの重複除去はアプリ側で行う。
 
-起動コードは `.data` / `.bss` を初期化する。リンクには `crates/reflex/link.x` を使う。
+起動コードは `.data` / `.bss` を初期化する。リンクには `reflex-cli` に内蔵した `link.x` を使う。
 コードの先頭は `0x90000000`、RAM初期値は `0x90500000`。
 マクロはグローバルアロケーターとpanic handlerも定義するため、アプリ側で重複定義しない。
 実装例は [関数電卓](../brain-calculator/src/main.rs)、ビルド例は `make calculator`。

@@ -14,6 +14,7 @@ Brainの第5世代（PW-x1）で遊ぼう！
 | [brain-hello-world](crates/brain-hello-world/README.md)   | Hello world の描画デモ                                   |
 | [brain-doom](crates/brain-doom/README.md)                 | Reflex を使う Doom                                       |
 | [brain-inspector](crates/brain-inspector/README.md)       | 画面・入力・音声の計測アプリ                             |
+| [brain-explorer](crates/brain-explorer/README.md) | フォルダー移動・ファイル内容の閲覧 |
 
 コマンドはリポジトリのルートで実行する。各 crate の使い方・ビルド手順はリンク先を参照。
 
@@ -22,6 +23,7 @@ Brainの第5世代（PW-x1）で遊ぼう！
 - [SDU フォーマット](docs/sdu-format.md)
 - [アプリバイナリ形式](docs/app-binary-format.md)
 - [音声 API](docs/audio.md)
+- [ファイル操作 API](docs/filesystem.md)
 
 ## 開発
 

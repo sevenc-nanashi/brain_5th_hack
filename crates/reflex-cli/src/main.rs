@@ -4,6 +4,7 @@ use std::{
     env,
     ffi::OsString,
     fs,
+    hash::{DefaultHasher, Hash, Hasher},
     path::{Component, Path, PathBuf},
     process::Command,
 };
@@ -31,8 +32,14 @@ struct Cli {
 enum Action {
     /// Build AppMain.bin and assemble the SD card application directory.
     Build { package: String },
-    /// Build and copy to PATH/APP/<app-name>, preserving other applications.
-    Deploy { package: String, path: PathBuf },
+    /// Copy to PATH/APP/<app-name>, preserving other applications.
+    Deploy {
+        package: String,
+        path: PathBuf,
+        /// Build before deploying.
+        #[usage(long)]
+        build: bool,
+    },
 }
 
 #[derive(Deserialize)]
@@ -61,7 +68,7 @@ struct PackageMetadata {
 struct App {
     name: String,
     output: String,
-    linker: PathBuf,
+    linker: Option<PathBuf>,
     #[serde(default)]
     assets: Vec<PathBuf>,
     #[serde(default)]
@@ -114,6 +121,12 @@ struct Build<'a> {
     objcopy: OsString,
 }
 impl Build<'_> {
+    fn output(&self) -> PathBuf {
+        self.target
+            .join(&self.app.output)
+            .join("APP")
+            .join(&self.app.name)
+    }
     fn root(&self) -> &Path {
         self.package.manifest_path.parent().unwrap()
     }
@@ -133,6 +146,21 @@ impl Build<'_> {
         cmd
     }
     fn build(&self) -> Result<PathBuf> {
+        let linker = match &self.app.linker {
+            Some(path) => self.root().join(path),
+            None => {
+                let directory = self.target.join(&self.app.output);
+                fs::create_dir_all(&directory)?;
+                let path = directory.join("link.x");
+                fs::write(&path, include_bytes!("../link.x"))?;
+                path
+            }
+        };
+        // Cargo does not track changes to files passed through link-arg.
+        let mut hash = DefaultHasher::new();
+        fs::read(&linker)
+            .with_context(|| format!("read linker script: {}", linker.display()))?
+            .hash(&mut hash);
         let mut cmd = self.command("rustc");
         cmd.arg("--bin").arg(&self.package.name).args([
             "--features",
@@ -148,19 +176,15 @@ impl Build<'_> {
             "-C",
             "relocation-model=static",
         ]);
-        cmd.arg("-C").arg(format!(
-            "link-arg=-T{}",
-            self.root().join(&self.app.linker).display()
-        ));
+        cmd.arg("-C")
+            .arg(format!("link-arg=-T{}", linker.display()));
+        cmd.arg("-C")
+            .arg(format!("metadata={:016x}", hash.finish()));
         for arg in &self.app.link_args {
             cmd.arg("-C").arg(format!("link-arg={arg}"));
         }
         run(&mut cmd)?;
-        let output = self
-            .target
-            .join(&self.app.output)
-            .join("APP")
-            .join(&self.app.name);
+        let output = self.output();
         fs::create_dir_all(&output)?;
         run(Command::new(&self.objcopy)
             .arg("-O")
@@ -340,7 +364,11 @@ fn main() -> Result<()> {
         Action::Build { .. } => {
             build.build()?;
         }
-        Action::Deploy { path, .. } => {
+        Action::Deploy {
+            path,
+            build: rebuild,
+            ..
+        } => {
             if !cfg!(windows) && windows_path(&path) {
                 ensure!(wsl(), "Windows destinations require WSL or native Windows");
             } else {
@@ -350,7 +378,17 @@ fn main() -> Result<()> {
                     path.display()
                 );
             }
-            deploy(&build.build()?, &path, &app.name)?;
+            let source = if rebuild {
+                build.build()?
+            } else {
+                build.output()
+            };
+            ensure!(
+                source.join("AppMain.bin").is_file() && source.join("index.din").is_file(),
+                "application output missing in {}; use deploy --build to build first",
+                source.display()
+            );
+            deploy(&source, &path, &app.name)?;
         }
     }
     Ok(())

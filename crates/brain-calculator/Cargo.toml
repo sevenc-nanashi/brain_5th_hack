@@ -17,6 +17,5 @@ required-features = ["device"]
 [package.metadata.reflex]
 name = "Calculator"
 output = "calculator"
-linker = "../reflex/link.x"
 link-args = ["--no-undefined"]
 assets = ["../reflex/assets/FONT-LICENSE.txt"]

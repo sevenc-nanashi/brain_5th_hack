@@ -3,8 +3,8 @@ OBJCOPY ?= llvm-objcopy-20
 BUILD_DIR ?= target
 REFLEX = $(CARGO) run --quiet -p reflex-cli -- --target-dir "$(BUILD_DIR)" --objcopy "$(OBJCOPY)"
 
-.PHONY: hello-world doom inspector calculator doom-fetch doom-preview calculator-preview
-hello-world doom inspector calculator:
+.PHONY: hello-world doom inspector calculator explorer doom-fetch doom-preview calculator-preview
+hello-world doom inspector calculator explorer:
 	$(REFLEX) build $@
 
 doom-fetch:

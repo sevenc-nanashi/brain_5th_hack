@@ -11,19 +11,20 @@ make doom-fetch
 reflex build brain-doom
 
 # ビルドしてSDカードのAPP/Inspectorへ配置
-reflex deploy brain-inspector /media/user/SDCARD
+reflex deploy --build brain-inspector /media/user/SDCARD
 
 # WSLからWindowsのドライブへ配置
 reflex deploy brain-inspector I:/
 ```
 
-Cargoパッケージ名に加え、`inspector`、`doom`、`calculator`、`hello-world` も使える。
+Cargoパッケージ名に加え、`inspector`、`doom`、`calculator`、`hello-world`、`explorer` も使える。
 未インストールでも `cargo run -p reflex-cli -- build inspector` の形式で実行できる。
 MakefileのアプリビルドはこのCLIへの互換窓口。外部入力の取得（`make doom-fetch`）とexample previewの実行は、従来どおりMakefile・スクリプトに残している。CLIからダウンロードやプレビューは行わない。
 
 - `build`: `cargo rustc`でARM ELFを生成し、`llvm-objcopy-20`でAppMain.binへ変換。
   `index.din`とライセンスなどの同梱ファイルをアプリ用フォルダーに配置する。
-- `deploy`: `build`の後、指定した既存ディレクトリ内の `APP/<name>` へコピーする。
+- `deploy`: 既存のビルド成果物を、指定した既存ディレクトリ内の `APP/<name>` へコピーする。
+  `--build` を付けると、ビルドしてから配置する。成果物がない場合はエラーになる。
   同名ファイルは上書きするが、他のアプリや配置先だけにあるファイルは削除しない。
   コピー中の失敗では部分的な更新が残るため、エラーを解消して再実行する。
 
@@ -47,13 +48,15 @@ Windows形式のパスをWSL以外のLinuxで指定した場合はエラーに�
 ## アプリの登録
 
 各アプリのCargo.tomlに設定する。`device` featureと、パッケージ名と同名のバイナリをビルドする。
-`linker`と`assets`はそのCargo.tomlのディレクトリ基準。同梱ファイルはファイル名を保ってアプリ直下にコピーする。
+`linker` は省略可能。省略時はCLI内蔵の `link.x` を `<target-dir>/<output>/link.x` に書き出して使用する。
+独自のスクリプトを使う場合だけ `linker = "link.x"` を指定する。
+`linker` と `assets` はそのCargo.tomlのディレクトリ基準。指定したスクリプトが存在しない場合はエラーになる。
+同梱ファイルはファイル名を保ってアプリ直下にコピーする。
 
 ```toml
 [package.metadata.reflex]
 name = "MyApp"
 output = "my-app"
-linker = "../reflex/link.x"
 link-args = ["--no-undefined"]
 assets = ["../reflex/assets/FONT-LICENSE.txt"]
 ```

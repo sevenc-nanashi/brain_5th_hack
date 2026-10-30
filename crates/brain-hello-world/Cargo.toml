@@ -17,4 +17,3 @@ reflex = { path = "../reflex" }
 [package.metadata.reflex]
 name = "HelloWorld"
 output = "hello-world"
-linker = "../reflex/link.x"
