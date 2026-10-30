@@ -1,0 +1,20 @@
+[package]
+name = "brain-tetris"
+version = "0.1.0"
+edition.workspace = true
+
+[features]
+device = ["reflex/application"]
+
+[dependencies]
+reflex = { path = "../reflex", features = ["font-antialias"] }
+
+[[bin]]
+name = "brain-tetris"
+required-features = ["device"]
+
+[package.metadata.reflex]
+name = "Tetris"
+output = "tetris"
+link-args = ["--no-undefined"]
+assets = ["../reflex/assets/FONT-LICENSE.txt"]

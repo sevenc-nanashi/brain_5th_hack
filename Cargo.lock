@@ -153,6 +153,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "brain-tetris"
+version = "0.1.0"
+dependencies = [
+ "reflex",
+]
+
+[[package]]
 name = "brain-usb-probe"
 version = "0.1.0"
 dependencies = [

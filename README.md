@@ -10,6 +10,7 @@ Brainの第5世代（PW-x1）で遊ぼう！
 | [brain-app-analyzer](crates/brain-app-analyzer/README.md) | AppMain.bin の起動コード・初期化テーブルの解析           |
 | [reflex](crates/reflex/README.md)                         | 第5世代 Brain アプリ向けの実行基盤・描画・入力・音声 API |
 | [reflex-cli](crates/reflex-cli/README.md)                 | アプリのビルド・SD カードへの配置                        |
+| [brain-tetris](crates/brain-tetris/README.md) | テトリス |
 | [brain-calculator](crates/brain-calculator/README.md)     | 関数電卓                                                 |
 | [brain-hello-world](crates/brain-hello-world/README.md)   | Hello world の描画デモ                                   |
 | [brain-doom](crates/brain-doom/README.md)                 | Reflex を使う Doom                                       |
