@@ -8,6 +8,9 @@ use reflex::{
     display::{HEIGHT, WIDTH},
     peg::key,
 };
+#[cfg(all(feature = "device", target_arch = "arm", target_os = "none"))]
+pub mod device;
+mod operations;
 mod paint;
 
 pub const MAX_ENTRIES: usize = 4096;
@@ -16,6 +19,7 @@ const TEXT_ROWS: usize = 12;
 const TEXT_COLUMNS: usize = 64;
 const HEX_BYTES: usize = 256;
 
+#[derive(Clone)]
 pub struct Entry {
     pub name: Vec<u8>,
     pub directory: bool,
@@ -27,6 +31,16 @@ pub trait Filesystem: 'static {
     fn read_dir(&mut self, path: &[u8]) -> Result<Vec<Entry>, &'static str>;
     /// Fill the buffer, stopping early only at EOF; propagate I/O failures.
     fn read(&mut self, path: &[u8], offset: u32, buffer: &mut [u8]) -> Result<usize, &'static str>;
+    fn metadata(&mut self, path: &[u8]) -> Result<Entry, &'static str>;
+    /// Fail if the destination exists, including case-insensitive aliases.
+    fn create_dir(&mut self, path: &[u8]) -> Result<(), &'static str>;
+    /// Used only inside a freshly created, exclusively owned staging directory.
+    fn create_file(&mut self, path: &[u8]) -> Result<(), &'static str>;
+    fn write(&mut self, path: &[u8], offset: u32, data: &[u8]) -> Result<(), &'static str>;
+    /// Same-volume move; must reject existing destinations.
+    fn rename(&mut self, source: &[u8], destination: &[u8]) -> Result<(), &'static str>;
+    /// Remove a file or empty folder only; never recurse.
+    fn remove(&mut self, path: &[u8], directory: bool) -> Result<(), &'static str>;
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -39,6 +53,10 @@ enum Control {
     Toggle,
     Refresh,
     Send,
+    Menu,
+    MenuItem(usize),
+    Confirm,
+    Cancel,
 }
 
 struct Viewer {
@@ -62,6 +80,11 @@ pub struct Explorer<F> {
     keys_down: [u32; 32],
     pressed: Option<Control>,
     send_requested: bool,
+    extension: Option<&'static [u8]>,
+    picked: Option<Vec<u8>>,
+    dialog: Option<operations::Dialog>,
+    clipboard: Option<operations::Clipboard>,
+    copying: Option<operations::CopyJob>,
 }
 
 impl<F: Filesystem> Explorer<F> {
@@ -77,7 +100,30 @@ impl<F: Filesystem> Explorer<F> {
             keys_down: [0; 32],
             pressed: None,
             send_requested: false,
+            extension: None,
+            picked: None,
+            dialog: None,
+            clipboard: None,
+            copying: None,
         }
+    }
+
+    /// Select a file instead of opening the text/hex viewer; directories remain navigable.
+    pub fn picker(fs: F, extension: &'static [u8]) -> Self {
+        let mut explorer = Self::new(fs);
+        explorer.extension = Some(extension);
+        explorer
+    }
+
+    pub fn reset_input(&mut self) {
+        self.keys_down.fill(0);
+        self.pressed = None;
+    }
+
+    pub fn take_picked_file(&mut self) -> Option<Vec<u8>> {
+        let picked = self.picked.take()?;
+        self.reset_input();
+        Some(picked)
     }
 
     fn send_target(&self) -> Option<(Vec<u8>, u32, bool)> {
@@ -95,8 +141,7 @@ impl<F: Filesystem> Explorer<F> {
         if !core::mem::take(&mut self.send_requested) {
             return None;
         }
-        self.keys_down.fill(0);
-        self.pressed = None;
+        self.reset_input();
         self.send_target()
     }
 
@@ -115,6 +160,17 @@ impl<F: Filesystem> Explorer<F> {
     fn load_dir(&mut self, path: &[u8]) -> Result<Vec<Entry>, &'static str> {
         let mut entries = self.fs.read_dir(path)?;
         entries.retain(|entry| entry.name != b"." && entry.name != b"..");
+        if let Some(extension) = self.extension {
+            entries.retain(|entry| {
+                entry.directory
+                    || (entry.name.contains(&b'.')
+                        && entry
+                            .name
+                            .rsplit(|&b| b == b'.')
+                            .next()
+                            .is_some_and(|suffix| suffix.eq_ignore_ascii_case(extension)))
+            });
+        }
         entries.sort_unstable_by(|a, b| b.directory.cmp(&a.directory).then(a.name.cmp(&b.name)));
         Ok(entries)
     }
@@ -132,6 +188,8 @@ impl<F: Filesystem> Explorer<F> {
             self.entries = entries;
             self.selected = 0;
             self.top = 0;
+        } else if self.extension.is_some() {
+            self.picked = Some(path);
         } else {
             let (lines, next) = self.page(&path, 0, false)?;
             self.viewer = Some(Viewer {
@@ -248,8 +306,12 @@ impl<F: Filesystem> Explorer<F> {
     }
 
     fn control(&mut self, control: Control) -> Result<Action, &'static str> {
+        if self.dialog.is_some() || self.copying.is_some() || control == Control::Menu {
+            return self.operation_control(control);
+        }
         if control == Control::Send {
-            if cfg!(feature = "device") && self.send_target().is_some() {
+            if cfg!(feature = "device") && self.extension.is_none() && self.send_target().is_some()
+            {
                 self.send_requested = true;
             }
             return Ok(Action::Redraw);
@@ -319,7 +381,14 @@ impl<F: Filesystem> Explorer<F> {
     }
 
     fn hit(&self, x: usize, y: usize) -> Option<Control> {
+        if self.dialog.is_some() || self.copying.is_some() {
+            return self.operation_hit(x, y);
+        }
+        if self.operations_enabled() && (300..432).contains(&x) && (4..48).contains(&y) {
+            return Some(Control::Menu);
+        }
         if cfg!(feature = "device")
+            && self.extension.is_none()
             && (440..608).contains(&x)
             && (4..48).contains(&y)
             && self.send_target().is_some()
@@ -349,9 +418,18 @@ impl<F: Filesystem> Explorer<F> {
 }
 
 impl<F: Filesystem> Application for Explorer<F> {
+    fn can_exit(&mut self) -> bool {
+        match self.cancel_copy() {
+            Ok(()) => true,
+            Err(error) => {
+                self.error = Some(error);
+                false
+            }
+        }
+    }
     fn event(&mut self, event: Event) -> Action {
         match event {
-            Event::Key { code, down, .. } => {
+            Event::Key { code, down, flags } => {
                 let word = usize::from(code) / 32;
                 if word >= self.keys_down.len() {
                     return Action::None;
@@ -365,6 +443,9 @@ impl<F: Filesystem> Application for Explorer<F> {
                     return Action::None;
                 }
                 self.keys_down[word] |= mask;
+                if self.dialog.is_some() || self.copying.is_some() {
+                    return self.operation_key(code, flags);
+                }
                 if self.viewer.is_none() && matches!(code, key::UP | key::DOWN) {
                     self.move_selection(if code == key::UP { -1 } else { 1 });
                     return Action::Redraw;
@@ -377,6 +458,7 @@ impl<F: Filesystem> Application for Explorer<F> {
                     0x54 | 0x74 => Control::Toggle,
                     0x52 | 0x72 => Control::Refresh,
                     0x53 | 0x73 => Control::Send,
+                    0x4d | 0x6d => Control::Menu,
                     _ => return Action::None,
                 };
                 self.activate(control)

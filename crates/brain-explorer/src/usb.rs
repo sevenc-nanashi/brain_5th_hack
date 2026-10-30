@@ -362,6 +362,13 @@ impl Application for Sender {
         if message.kind != peg::PM_TIMER || message.param != TIMER as u16 {
             return None;
         }
+        if self.state == State::Browsing {
+            let action = self.explorer.poll();
+            if !self.explorer.copying() {
+                self.power_inhibit = None;
+            }
+            return Some(action);
+        }
         Some(match self.tick() {
             Ok(action) => action,
             Err(error) => {
@@ -400,7 +407,13 @@ impl Application for Sender {
             }
             return Action::None;
         }
+        if self.power_inhibit.is_none() {
+            self.power_inhibit = Some(PowerInhibit::new());
+        }
         let action = self.explorer.event(event);
+        if !self.explorer.copying() {
+            self.power_inhibit = None;
+        }
         if let Some((name, size, directory)) = self.explorer.take_send_target() {
             if let Err(error) = self.start(&name, size, directory) {
                 self.set(State::Error, error);
@@ -410,7 +423,12 @@ impl Application for Sender {
         action
     }
     fn can_exit(&mut self) -> bool {
+        if self.state == State::Browsing && !self.explorer.can_exit() {
+            self.power_inhibit = None;
+            return false;
+        }
         if self.state == State::Browsing || self.transfer.is_none() {
+            self.power_inhibit = None;
             unsafe {
                 raw::kill_timer(self.window, TIMER);
             }

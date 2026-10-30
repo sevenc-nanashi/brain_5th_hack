@@ -106,7 +106,7 @@ pub fn draw(game: &Tetris, pixels: &mut [u16]) {
     for (i, &kind) in game.next.iter().enumerate() {
         c.preview(530 + i * 60, 66, 14, kind, false);
     }
-    c.text(530, 134, "Left/Right  Move\nUp / X      Rotate CW\nZ           Rotate CCW\nDown        Soft drop\nSpace       Hard drop\nC / Shift   Hold\nEnter / P   Pause\nEsc         Exit", 1);
+    c.text(530, 134, "Left/Right  Move\nX           Rotate CW\nZ           Rotate CCW\nDown        Soft drop\nUp / Space  Hard drop\nC / Shift   Hold\nEnter / P   Pause\nDel         Reset\nEsc         Exit", 1);
     if game.back_to_back {
         c.text(
             530,

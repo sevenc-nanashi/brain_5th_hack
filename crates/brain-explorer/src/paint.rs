@@ -51,9 +51,34 @@ fn shorten(text: &str, columns: usize) -> String {
 pub(super) fn draw<F: Filesystem>(app: &Explorer<F>, pixels: &mut [u16]) {
     pixels.fill(BG);
     let mut c = Canvas(pixels);
-    c.text(16, 14, "Explorer", INK, 2);
+    c.text(
+        16,
+        14,
+        if app.extension.is_some() {
+            "Select file"
+        } else {
+            "Explorer"
+        },
+        INK,
+        2,
+    );
+    if app.dialog.is_some() || app.copying.is_some() {
+        operations(app, &mut c);
+        return;
+    }
     c.text(620, 20, "R  Refresh", MUTED, 1);
-    if cfg!(feature = "device") {
+    if app.operations_enabled() {
+        let pressed = app.pressed == Some(Control::Menu);
+        c.rect(300, 4, 132, 44, if pressed { ACCENT } else { LINE });
+        c.text(
+            308,
+            20,
+            "M  File actions",
+            if pressed { WHITE } else { INK },
+            1,
+        );
+    }
+    if cfg!(feature = "device") && app.extension.is_none() {
         let enabled = app.send_target().is_some();
         let pressed = enabled && app.pressed == Some(Control::Send);
         c.rect(440, 4, 168, 44, if pressed { ACCENT } else { LINE });
@@ -129,7 +154,7 @@ pub(super) fn draw<F: Filesystem>(app: &Explorer<F>, pixels: &mut [u16]) {
             if viewer.hex { "T  Text" } else { "T  Hex" },
         )
     } else {
-        c.text(156, 20, &format!("{} items", app.entries.len()), MUTED, 1);
+        c.text(176, 20, &format!("{} items", app.entries.len()), MUTED, 1);
         if app.entries.is_empty() {
             c.text(16, 104, "Empty folder", MUTED, 2);
         }
@@ -190,16 +215,45 @@ pub(super) fn draw<F: Filesystem>(app: &Explorer<F>, pixels: &mut [u16]) {
         (
             app.selected > 0,
             app.selected + 1 < app.entries.len(),
-            "Enter  Open",
+            if app.extension.is_some()
+                && app
+                    .entries
+                    .get(app.selected)
+                    .is_some_and(|entry| !entry.directory)
+            {
+                "Enter Select"
+            } else {
+                "Enter  Open"
+            },
         )
     };
+    if app.error.is_none()
+        && let Some(clip) = &app.clipboard
+    {
+        c.text(
+            16,
+            408,
+            &shorten(
+                &format!(
+                    "{}   {}",
+                    if clip.cut { "Cut" } else { "Copy" },
+                    escaped(&clip.entry.name)
+                ),
+                127,
+            ),
+            MUTED,
+            1,
+        );
+    }
     if let Some(error) = app.error {
         c.text(16, 408, error, ERROR, 1);
     }
     let controls = [
         (
             Control::Back,
-            if app.folders.is_empty() {
+            if app.folders.is_empty() && app.extension.is_some() {
+                "Esc  Cancel"
+            } else if app.folders.is_empty() {
                 "Esc  Exit"
             } else {
                 "Esc  Back"
@@ -235,5 +289,152 @@ pub(super) fn draw<F: Filesystem>(app: &Explorer<F>, pixels: &mut [u16]) {
             },
             2,
         );
+    }
+}
+
+fn operations<F: Filesystem>(app: &Explorer<F>, c: &mut Canvas<'_>) {
+    use super::operations::{Dialog, MENU};
+    c.rect(16, 50, 768, 1, LINE);
+    c.text(16, 64, &shorten(&escaped(&app.path(None)), 125), MUTED, 1);
+    let mut confirm = None;
+    if let Some(copy) = &app.copying {
+        c.text(16, 104, "Copying", INK, 2);
+        c.text(16, 150, &shorten(&escaped(&copy.source), 125), INK, 1);
+        c.text(16, 180, &shorten(&escaped(&copy.destination), 125), INK, 1);
+        c.text(
+            16,
+            238,
+            &format!("{} / {} bytes", copy.offset, copy.size),
+            INK,
+            2,
+        );
+        c.rect(16, 292, 768, 16, LINE);
+        let progress = if copy.size == 0 {
+            768
+        } else {
+            (u64::from(copy.offset) * 768 / u64::from(copy.size)) as usize
+        };
+        c.rect(16, 292, progress, 16, ACCENT);
+    } else {
+        match app.dialog.as_ref().unwrap() {
+            Dialog::Menu(selected) => {
+                if let Some(entry) = app.entries.get(app.selected) {
+                    c.text(16, 390, &shorten(&escaped(&entry.name), 127), MUTED, 1);
+                }
+                for (index, label) in MENU.iter().enumerate() {
+                    let enabled = app.menu_enabled(index);
+                    let active =
+                        *selected == index || app.pressed == Some(Control::MenuItem(index));
+                    c.rect(
+                        16,
+                        104 + index * 44,
+                        768,
+                        40,
+                        if active { ACCENT } else { WHITE },
+                    );
+                    c.text(
+                        28,
+                        111 + index * 44,
+                        label,
+                        if active {
+                            WHITE
+                        } else if enabled {
+                            INK
+                        } else {
+                            MUTED
+                        },
+                        2,
+                    );
+                    if !enabled {
+                        c.text(
+                            600,
+                            118 + index * 44,
+                            if index == 0
+                                && app.entries.get(app.selected).is_some_and(|e| e.directory)
+                            {
+                                "Files only"
+                            } else if index != 0 && !app.writable_folder() {
+                                "Read-only"
+                            } else if index == 2 {
+                                "Clipboard empty"
+                            } else {
+                                "Select an item"
+                            },
+                            if active { WHITE } else { MUTED },
+                            1,
+                        );
+                    }
+                }
+            }
+            Dialog::Name { rename, name } => {
+                c.text(
+                    16,
+                    104,
+                    if *rename { "Rename" } else { "New folder" },
+                    INK,
+                    2,
+                );
+                if *rename && let Some(entry) = app.entries.get(app.selected) {
+                    c.text(16, 150, &shorten(&escaped(&entry.name), 125), MUTED, 1);
+                }
+                c.text(16, 190, "Name", INK, 1);
+                c.rect(16, 216, 768, 48, WHITE);
+                let start = name.len().saturating_sub(60);
+                c.text(28, 226, &format!("{}_", &name[start..]), INK, 2);
+                c.text(
+                    16,
+                    282,
+                    "Letters, numbers, spaces and _ - . ( )    Shift for uppercase",
+                    MUTED,
+                    1,
+                );
+                confirm = Some(if *rename {
+                    "Enter  Rename"
+                } else {
+                    "Enter  Create folder"
+                });
+            }
+            Dialog::Delete => {
+                c.text(16, 104, "Delete this item?", ERROR, 2);
+                if let Some(entry) = app.entries.get(app.selected) {
+                    for (row, chunk) in escaped(&entry.name)
+                        .as_bytes()
+                        .chunks(62)
+                        .take(7)
+                        .enumerate()
+                    {
+                        c.text(
+                            16,
+                            150 + row * 28,
+                            core::str::from_utf8(chunk).unwrap(),
+                            INK,
+                            2,
+                        );
+                    }
+                }
+                c.text(
+                    16,
+                    370,
+                    "This cannot be undone. Only empty folders can be deleted.",
+                    ERROR,
+                    1,
+                );
+                confirm = Some("Y  Delete");
+            }
+        }
+    }
+    if let Some(error) = app.error {
+        c.text(16, 408, error, ERROR, 1);
+    }
+    for (x, control, label) in [
+        Some((16, Control::Cancel, "Esc  Cancel")),
+        confirm.map(|label| (416, Control::Confirm, label)),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let pressed = app.pressed == Some(control);
+        c.rect(x, 426, 368, 48, if pressed { ACCENT } else { LINE });
+        c.text(x + 12, 437, label, if pressed { WHITE } else { INK }, 2);
     }
 }

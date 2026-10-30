@@ -160,6 +160,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "brain-tic80"
+version = "0.1.0"
+dependencies = [
+ "brain-explorer",
+ "reflex",
+]
+
+[[package]]
 name = "brain-usb-probe"
 version = "0.1.0"
 dependencies = [

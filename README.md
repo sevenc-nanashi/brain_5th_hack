@@ -14,6 +14,7 @@ Brainの第5世代（PW-x1）で遊ぼう！
 | [brain-calculator](crates/brain-calculator/README.md)     | 関数電卓                                                 |
 | [brain-hello-world](crates/brain-hello-world/README.md)   | Hello world の描画デモ                                   |
 | [brain-doom](crates/brain-doom/README.md)                 | Reflex を使う Doom                                       |
+| [brain-tic80](crates/brain-tic80/README.md) | TIC-80 Luaカートリッジプレイヤー |
 | [brain-inspector](crates/brain-inspector/README.md)       | 画面・入力・音声の計測アプリ                             |
 | [brain-explorer](crates/brain-explorer/README.md) | フォルダー移動・ファイル内容の閲覧 |
 | [brain-usb-probe](crates/brain-usb-probe/README.md) | USB通信・再送の実験的な疎通確認 |

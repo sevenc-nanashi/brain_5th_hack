@@ -89,7 +89,7 @@ pub struct Tetris {
     repeat_ms: u64,
     paused: bool,
     over: bool,
-    keys: [bool; 11],
+    keys: [bool; 13],
 }
 impl Tetris {
     pub fn new(seed: u32) -> Self {
@@ -120,7 +120,7 @@ impl Tetris {
             repeat_ms: 0,
             paused: false,
             over: false,
-            keys: [false; 11],
+            keys: [false; 13],
         };
         let first = game.take_piece();
         game.spawn(first);
@@ -389,6 +389,8 @@ impl Application for Tetris {
             key::SHIFT,
             key::ENTER,
             b'P' as u16,
+            key::BACKSPACE,
+            0x7f,
         ]
         .iter()
         .position(|&binding| binding == code) else {
@@ -411,7 +413,7 @@ impl Application for Tetris {
             return Action::None;
         }
         if index >= 9 {
-            if self.over && index == 9 {
+            if index >= 11 || (self.over && index == 9) {
                 let keys = self.keys;
                 *self = Self::new(self.random);
                 self.keys = keys;
@@ -437,9 +439,9 @@ impl Application for Tetris {
                 self.soft_drop();
                 self.gravity_ms = 0;
             }
-            3 | 4 => self.rotate(true),
+            4 => self.rotate(true),
             5 => self.rotate(false),
-            6 => {
+            3 | 6 => {
                 while self.shift(0, 1) {
                     self.score = self.score.saturating_add(2);
                 }

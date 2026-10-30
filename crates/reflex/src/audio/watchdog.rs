@@ -21,7 +21,11 @@ impl StreamWatchdog {
         now_us: u64,
         timeout_us: u64,
     ) -> bool {
-        let boundary = cursors == [0, buffer_bytes] || cursors == [buffer_bytes, 0];
+        // Exhausting both inputs can suppress refill notifications in the PCM service.
+        let boundary = cursors == [0, buffer_bytes]
+            || cursors == [buffer_bytes, 0]
+            || cursors == [buffer_bytes, buffer_bytes]
+            || cursors == [0, 0];
         let current = (cursors, byte_position);
         if !boundary || self.previous != Some(current) {
             self.since_us = now_us;

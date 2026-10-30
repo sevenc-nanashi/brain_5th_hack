@@ -49,6 +49,29 @@ impl Filesystem for Host {
             .map(|count| count as usize)
             .map_err(|_| "Cannot read file")
     }
+    fn metadata(&mut self, path: &[u8]) -> Result<Entry, &'static str> {
+        let metadata = fs::metadata(self.path(path)?).map_err(|_| "Cannot read metadata")?;
+        Ok(Entry {
+            name: Vec::new(),
+            directory: metadata.is_dir(),
+            size: u32::try_from(metadata.len()).map_err(|_| "File size exceeds u32::MAX")?,
+        })
+    }
+    fn create_dir(&mut self, _: &[u8]) -> Result<(), &'static str> {
+        Err("Preview is read-only")
+    }
+    fn create_file(&mut self, _: &[u8]) -> Result<(), &'static str> {
+        Err("Preview is read-only")
+    }
+    fn write(&mut self, _: &[u8], _: u32, _: &[u8]) -> Result<(), &'static str> {
+        Err("Preview is read-only")
+    }
+    fn rename(&mut self, _: &[u8], _: &[u8]) -> Result<(), &'static str> {
+        Err("Preview is read-only")
+    }
+    fn remove(&mut self, _: &[u8], _: bool) -> Result<(), &'static str> {
+        Err("Preview is read-only")
+    }
 }
 
 fn key(app: &mut impl Application, code: u16) {
@@ -81,7 +104,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .expect("Usage: preview INPUT_DIRECTORY OUTPUT_DIRECTORY"),
     );
     let output = PathBuf::from(args.next().expect("Missing output directory"));
-    let mut host = Host(root);
+    let mut host = Host(root.clone());
     let entries = host.read_dir(b"SD0:\\")?;
     let directories = entries.iter().filter(|entry| entry.directory).count();
     fs::create_dir_all(&output)?;
@@ -89,6 +112,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     save(&app, &output, "storage.ppm")?;
     key(&mut app, key::ENTER);
     save(&app, &output, "directory.ppm")?;
+    key(&mut app, b'M' as u16);
+    save(&app, &output, "actions.ppm")?;
+    for _ in 0..5 {
+        key(&mut app, key::DOWN);
+    }
+    key(&mut app, key::ENTER);
+    save(&app, &output, "new-folder.ppm")?;
+    key(&mut app, key::ESCAPE);
     if entries.iter().any(|entry| !entry.directory) {
         for _ in 0..directories {
             key(&mut app, key::DOWN);
@@ -101,5 +132,44 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         key(&mut app, b'T' as u16);
         save(&app, &output, "hex.ppm")?;
     }
+    let mut picker = Explorer::picker(Host(root), b"tic");
+    key(&mut picker, key::ENTER);
+    save(&picker, &output, "picker.ppm")?;
+    if let Some(first) = entries
+        .iter()
+        .filter(|entry| {
+            !entry.directory
+                && entry.name.len() >= 4
+                && entry.name[entry.name.len() - 4..].eq_ignore_ascii_case(b".tic")
+        })
+        .min_by(|a, b| a.name.cmp(&b.name))
+    {
+        for _ in 0..directories {
+            key(&mut picker, key::DOWN);
+        }
+        key(&mut picker, key::ENTER);
+        let mut expected = b"SD0:\\".to_vec();
+        expected.extend_from_slice(&first.name);
+        assert_eq!(picker.take_picked_file(), Some(expected.clone()));
+        assert_eq!(picker.take_picked_file(), None);
+        // Selection keeps the list open for the embedding application to reuse.
+        for phase in [reflex::TouchPhase::Down, reflex::TouchPhase::Up] {
+            picker.event(Event::Touch {
+                x: 700,
+                y: 450,
+                phase,
+            });
+        }
+        assert_eq!(picker.take_picked_file(), Some(expected));
+    }
+    key(&mut picker, key::ESCAPE);
+    assert_eq!(
+        picker.event(Event::Key {
+            code: key::ESCAPE,
+            down: true,
+            flags: 0
+        }),
+        reflex::Action::Exit
+    );
     Ok(())
 }

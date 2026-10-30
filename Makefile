@@ -3,9 +3,17 @@ OBJCOPY ?= llvm-objcopy-20
 BUILD_DIR ?= target
 REFLEX = $(CARGO) run --quiet -p reflex-cli -- --target-dir "$(BUILD_DIR)" --objcopy "$(OBJCOPY)"
 
-.PHONY: tetris tetris-preview hello-world doom inspector calculator explorer browser pocketjs doom-fetch browser-fetch doom-preview calculator-preview browser-preview pocketjs-preview
-hello-world doom inspector calculator explorer browser pocketjs tetris:
+.PHONY: tic80 tic80-fetch tic80-preview tetris tetris-preview hello-world doom inspector calculator explorer browser pocketjs doom-fetch browser-fetch doom-preview calculator-preview browser-preview pocketjs-preview
+hello-world doom inspector calculator explorer browser pocketjs tetris tic80:
 	$(REFLEX) build $@
+
+tic80-fetch:
+	ruby scripts/fetch-tic80.rb "$(BUILD_DIR)/tic80-inputs"
+
+tic80: tic80-fetch
+
+tic80-preview: tic80-fetch
+	TIC80_INPUTS=$(abspath $(BUILD_DIR)/tic80-inputs) $(CARGO) run -p brain-tic80 --example preview --features engine --release --target-dir $(BUILD_DIR) -- $(BUILD_DIR)/tic80-inputs/cart.tic $(BUILD_DIR)/tic80-preview
 
 doom-fetch:
 	ruby scripts/fetch-doom.rb "$(BUILD_DIR)/doom-inputs"

@@ -1,0 +1,29 @@
+[package]
+name = "brain-tic80"
+version = "0.1.0"
+edition.workspace = true
+
+[features]
+engine = []
+device = ["engine", "reflex/application", "reflex/panic-qr", "brain-explorer/device"]
+
+[dependencies]
+brain-explorer = { path = "../brain-explorer" }
+reflex = { path = "../reflex", features = ["text"] }
+
+[[bin]]
+name = "brain-tic80"
+required-features = ["device"]
+
+[[example]]
+name = "preview"
+required-features = ["engine"]
+
+[package.metadata.reflex]
+name = "TIC80"
+output = "tic80"
+
+[package.metadata.reflex.inputs]
+directory = "tic80-inputs"
+env = "TIC80_INPUTS"
+assets = ["LICENSES.txt", "cart.tic"]

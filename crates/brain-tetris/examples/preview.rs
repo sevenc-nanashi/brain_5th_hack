@@ -39,11 +39,11 @@ fn main() -> std::io::Result<()> {
     save(&game, directory, "start.ppm")?;
     press(&mut game, b'C' as u16);
     save(&game, directory, "hold.ppm")?;
-    for keys in [vec![key::LEFT; 3], vec![key::RIGHT; 3], vec![key::UP]] {
+    for keys in [vec![key::LEFT; 3], vec![key::RIGHT; 3], vec![b'X' as u16]] {
         for code in keys {
             press(&mut game, code);
         }
-        press(&mut game, key::SPACE);
+        press(&mut game, key::UP);
     }
     game.advance(700);
     save(&game, directory, "playing.ppm")?;
@@ -57,10 +57,10 @@ fn main() -> std::io::Result<()> {
     assert_eq!(paused, after, "paused board must not advance");
     press(&mut game, key::ENTER);
     for _ in 0..30 {
-        press(&mut game, key::SPACE);
+        press(&mut game, key::UP);
     }
     save(&game, directory, "game-over.ppm")?;
-    press(&mut game, key::ENTER);
+    press(&mut game, key::BACKSPACE);
     save(&game, directory, "retry.ppm")?;
     Ok(())
 }
