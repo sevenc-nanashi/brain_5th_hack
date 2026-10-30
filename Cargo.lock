@@ -64,6 +64,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
+name = "arrayvec"
+version = "0.7.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
+
+[[package]]
 name = "block-buffer"
 version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -128,6 +134,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "brain-pocketjs"
+version = "0.1.0"
+dependencies = [
+ "microts",
+ "pocket-raster",
+ "reflex",
+]
+
+[[package]]
 name = "brain-rom-dumper"
 version = "0.1.0"
 dependencies = [
@@ -143,6 +158,12 @@ version = "0.1.0"
 dependencies = [
  "reflex",
 ]
+
+[[package]]
+name = "byteorder"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "cfg-if"
@@ -236,6 +257,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "hash32"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47d60b12902ba28e2730cd37e95b8c9223af2808df9e902d4df49588d1470606"
+dependencies = [
+ "byteorder",
+]
+
+[[package]]
+name = "heapless"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0bfb9eb618601c89945a70e254898da93b13be0388091d42117462b265bb3fad"
+dependencies = [
+ "hash32",
+ "portable-atomic",
+ "stable_deref_trait",
+]
+
+[[package]]
 name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -272,6 +313,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
+name = "microts"
+version = "0.1.0"
+source = "git+https://github.com/pocket-nexus/pocketjs.git?rev=8bc0525776efe779ef9592e0b91574cfbc91f60b#8bc0525776efe779ef9592e0b91574cfbc91f60b"
+dependencies = [
+ "heapless",
+ "libm",
+ "pocket-spec",
+ "pocketjs-core",
+ "portable-atomic",
+ "ryu-js",
+]
+
+[[package]]
 name = "miniz_oxide"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -279,6 +333,96 @@ checksum = "1fa76a2c86f704bdb222d66965fb3d63269ce38518b83cb0575fca855ebb6316"
 dependencies = [
  "adler2",
 ]
+
+[[package]]
+name = "pocket-draw-ops"
+version = "0.1.0"
+source = "git+https://github.com/pocket-nexus/pocketjs.git?rev=8bc0525776efe779ef9592e0b91574cfbc91f60b#8bc0525776efe779ef9592e0b91574cfbc91f60b"
+dependencies = [
+ "pocket-drivers",
+ "pocket-spec",
+]
+
+[[package]]
+name = "pocket-drivers"
+version = "0.1.0"
+source = "git+https://github.com/pocket-nexus/pocketjs.git?rev=8bc0525776efe779ef9592e0b91574cfbc91f60b#8bc0525776efe779ef9592e0b91574cfbc91f60b"
+dependencies = [
+ "pocket-spec",
+]
+
+[[package]]
+name = "pocket-glyph-pages"
+version = "0.1.0"
+source = "git+https://github.com/pocket-nexus/pocketjs.git?rev=8bc0525776efe779ef9592e0b91574cfbc91f60b#8bc0525776efe779ef9592e0b91574cfbc91f60b"
+dependencies = [
+ "pocket-drivers",
+ "pocket-spec",
+]
+
+[[package]]
+name = "pocket-media"
+version = "0.1.0"
+source = "git+https://github.com/pocket-nexus/pocketjs.git?rev=8bc0525776efe779ef9592e0b91574cfbc91f60b#8bc0525776efe779ef9592e0b91574cfbc91f60b"
+dependencies = [
+ "pocket-spec",
+]
+
+[[package]]
+name = "pocket-package"
+version = "0.1.0"
+source = "git+https://github.com/pocket-nexus/pocketjs.git?rev=8bc0525776efe779ef9592e0b91574cfbc91f60b#8bc0525776efe779ef9592e0b91574cfbc91f60b"
+dependencies = [
+ "pocket-drivers",
+ "pocket-spec",
+]
+
+[[package]]
+name = "pocket-present"
+version = "0.1.0"
+source = "git+https://github.com/pocket-nexus/pocketjs.git?rev=8bc0525776efe779ef9592e0b91574cfbc91f60b#8bc0525776efe779ef9592e0b91574cfbc91f60b"
+dependencies = [
+ "pocket-draw-ops",
+ "pocket-drivers",
+ "pocket-raster",
+ "pocket-spec",
+]
+
+[[package]]
+name = "pocket-raster"
+version = "0.1.0"
+source = "git+https://github.com/pocket-nexus/pocketjs.git?rev=8bc0525776efe779ef9592e0b91574cfbc91f60b#8bc0525776efe779ef9592e0b91574cfbc91f60b"
+dependencies = [
+ "pocket-draw-ops",
+ "pocket-drivers",
+ "pocket-spec",
+]
+
+[[package]]
+name = "pocket-spec"
+version = "0.1.0"
+source = "git+https://github.com/pocket-nexus/pocketjs.git?rev=8bc0525776efe779ef9592e0b91574cfbc91f60b#8bc0525776efe779ef9592e0b91574cfbc91f60b"
+
+[[package]]
+name = "pocketjs-core"
+version = "0.1.0"
+source = "git+https://github.com/pocket-nexus/pocketjs.git?rev=8bc0525776efe779ef9592e0b91574cfbc91f60b#8bc0525776efe779ef9592e0b91574cfbc91f60b"
+dependencies = [
+ "pocket-drivers",
+ "pocket-glyph-pages",
+ "pocket-media",
+ "pocket-package",
+ "pocket-present",
+ "pocket-raster",
+ "pocket-spec",
+ "taffy",
+]
+
+[[package]]
+name = "portable-atomic"
+version = "1.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05c8b63e8d9609db387f0324918f81d68fe27748f084ef092fb35954d0539a85"
 
 [[package]]
 name = "proc-macro2"
@@ -329,6 +473,12 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "ryu-js"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "04d056b875a9d2e6cb9a61d127afee9ac5999b9f87bcb32079d1318e505be714"
 
 [[package]]
 name = "serde"
@@ -385,6 +535,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "slotmap"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bdd58c3c93c3d278ca835519292445cb4b0d4dc59ccfdf7ceadaab3f8aeb4038"
+dependencies = [
+ "version_check",
+]
+
+[[package]]
+name = "stable_deref_trait"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
+
+[[package]]
 name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -399,6 +564,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "taffy"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dfde4e2f8595f222ceaae1fb16b4963952e9b33e358869dc4cd6316b0e0790cd"
+dependencies = [
+ "arrayvec",
+ "serde",
+ "slotmap",
 ]
 
 [[package]]

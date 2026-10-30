@@ -1,0 +1,21 @@
+[package]
+name = "brain-pocketjs"
+version = "0.1.0"
+edition.workspace = true
+
+[features]
+device = ["reflex/application", "reflex/panic-qr"]
+
+[[bin]]
+name = "brain-pocketjs"
+required-features = ["device"]
+
+[dependencies]
+reflex = { path = "../reflex" }
+microts = { git = "https://github.com/pocket-nexus/pocketjs.git", rev = "8bc0525776efe779ef9592e0b91574cfbc91f60b" }
+pocket-raster = { git = "https://github.com/pocket-nexus/pocketjs.git", rev = "8bc0525776efe779ef9592e0b91574cfbc91f60b" }
+
+[package.metadata.reflex]
+name = "PocketJS"
+output = "pocketjs"
+assets = ["assets/FONT-LICENSE.txt", "assets/POCKETJS-LICENSE.txt"]

@@ -1,0 +1,15 @@
+{
+  "name": "brain-5th-hack",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "pocketjs:generate": "bun scripts/generate-pocketjs.ts",
+    "pocketjs:build": "bun run pocketjs:generate && make pocketjs",
+    "pocketjs:preview": "bun run pocketjs:generate && make pocketjs-preview"
+  },
+  "devDependencies": {
+    "@pocketjs/framework": "github:pocket-nexus/pocketjs#8bc0525776efe779ef9592e0b91574cfbc91f60b",
+    "solid-js": "1.9.14",
+    "typescript": "5.9.3"
+  }
+}

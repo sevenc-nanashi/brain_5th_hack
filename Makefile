@@ -3,8 +3,8 @@ OBJCOPY ?= llvm-objcopy-20
 BUILD_DIR ?= target
 REFLEX = $(CARGO) run --quiet -p reflex-cli -- --target-dir "$(BUILD_DIR)" --objcopy "$(OBJCOPY)"
 
-.PHONY: hello-world doom inspector calculator explorer browser doom-fetch browser-fetch doom-preview calculator-preview browser-preview
-hello-world doom inspector calculator explorer browser:
+.PHONY: hello-world doom inspector calculator explorer browser pocketjs doom-fetch browser-fetch doom-preview calculator-preview browser-preview pocketjs-preview
+hello-world doom inspector calculator explorer browser pocketjs:
 	$(REFLEX) build $@
 
 doom-fetch:
@@ -24,3 +24,6 @@ doom-preview:
 
 calculator-preview:
 	$(CARGO) run -p brain-calculator --example preview --target-dir $(BUILD_DIR) -- $(BUILD_DIR)/calculator-preview
+
+pocketjs-preview:
+	$(CARGO) run -p brain-pocketjs --example preview --target-dir $(BUILD_DIR) -- $(BUILD_DIR)/pocketjs-preview
