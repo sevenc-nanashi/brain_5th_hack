@@ -7,6 +7,10 @@ use brain_explorer::{Entry, Explorer, Filesystem, MAX_ENTRIES};
 use core::ffi::CStr;
 use reflex::fs;
 
+mod compression;
+mod source;
+mod usb;
+
 struct Device;
 
 fn path(value: &[u8]) -> Result<CString, &'static str> {
@@ -61,6 +65,6 @@ impl Filesystem for Device {
 }
 
 #[reflex::main]
-fn main() -> Explorer<Device> {
-    Explorer::new(Device)
+fn main() -> usb::Sender {
+    usb::Sender::new(Explorer::new(Device))
 }

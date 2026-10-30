@@ -53,6 +53,25 @@ pub(super) fn draw<F: Filesystem>(app: &Explorer<F>, pixels: &mut [u16]) {
     let mut c = Canvas(pixels);
     c.text(16, 14, "Explorer", INK, 2);
     c.text(620, 20, "R  Refresh", MUTED, 1);
+    if cfg!(feature = "device") {
+        let enabled = app.send_target().is_some();
+        let pressed = enabled && app.pressed == Some(Control::Send);
+        c.rect(440, 4, 168, 44, if pressed { ACCENT } else { LINE });
+        c.text(
+            448,
+            20,
+            "S  Send to PC",
+            if pressed {
+                WHITE
+            } else if enabled {
+                INK
+            } else {
+                MUTED
+            },
+            1,
+        );
+    }
+
     c.rect(16, 50, 768, 1, LINE);
     let path = if app.folders.is_empty() {
         String::from("Storage")

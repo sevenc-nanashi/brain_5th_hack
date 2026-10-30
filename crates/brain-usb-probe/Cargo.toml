@@ -1,0 +1,18 @@
+[package]
+name = "brain-usb-probe"
+version = "0.1.0"
+edition.workspace = true
+
+[features]
+device = ["reflex/application", "reflex/panic-qr"]
+
+[[bin]]
+name = "brain-usb-probe"
+required-features = ["device"]
+
+[dependencies]
+reflex = { path = "../reflex", features = ["text"] }
+
+[package.metadata.reflex]
+name = "UsbProbe"
+output = "usb-probe"

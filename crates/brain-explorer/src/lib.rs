@@ -38,6 +38,7 @@ enum Control {
     Open,
     Toggle,
     Refresh,
+    Send,
 }
 
 struct Viewer {
@@ -60,6 +61,7 @@ pub struct Explorer<F> {
     error: Option<&'static str>,
     keys_down: [u32; 32],
     pressed: Option<Control>,
+    send_requested: bool,
 }
 
 impl<F: Filesystem> Explorer<F> {
@@ -74,7 +76,28 @@ impl<F: Filesystem> Explorer<F> {
             error: None,
             keys_down: [0; 32],
             pressed: None,
+            send_requested: false,
         }
+    }
+
+    fn send_target(&self) -> Option<(Vec<u8>, u32, bool)> {
+        if let Some(viewer) = &self.viewer {
+            Some((self.path(Some(&viewer.name)), viewer.size, false))
+        } else {
+            self.entries
+                .get(self.selected)
+                .map(|entry| (self.path(Some(&entry.name)), entry.size, entry.directory))
+        }
+    }
+
+    /// Consume the device UI's send request, preserving the current folder/viewer.
+    pub fn take_send_target(&mut self) -> Option<(Vec<u8>, u32, bool)> {
+        if !core::mem::take(&mut self.send_requested) {
+            return None;
+        }
+        self.keys_down.fill(0);
+        self.pressed = None;
+        self.send_target()
     }
 
     fn path(&self, name: Option<&[u8]>) -> Vec<u8> {
@@ -225,6 +248,12 @@ impl<F: Filesystem> Explorer<F> {
     }
 
     fn control(&mut self, control: Control) -> Result<Action, &'static str> {
+        if control == Control::Send {
+            if cfg!(feature = "device") && self.send_target().is_some() {
+                self.send_requested = true;
+            }
+            return Ok(Action::Redraw);
+        }
         if control == Control::Back {
             return self.back();
         }
@@ -290,6 +319,13 @@ impl<F: Filesystem> Explorer<F> {
     }
 
     fn hit(&self, x: usize, y: usize) -> Option<Control> {
+        if cfg!(feature = "device")
+            && (440..608).contains(&x)
+            && (4..48).contains(&y)
+            && self.send_target().is_some()
+        {
+            return Some(Control::Send);
+        }
         if !(16..784).contains(&x) {
             return None;
         }
@@ -340,6 +376,7 @@ impl<F: Filesystem> Application for Explorer<F> {
                     key::PAGE_DOWN | key::DOWN => Control::Next,
                     0x54 | 0x74 => Control::Toggle,
                     0x52 | 0x72 => Control::Refresh,
+                    0x53 | 0x73 => Control::Send,
                     _ => return Action::None,
                 };
                 self.activate(control)
