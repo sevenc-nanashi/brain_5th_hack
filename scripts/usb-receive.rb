@@ -2,15 +2,15 @@
 # Receive the file selected in Explorer. Linux only; reuses the guarded SG_IO transport.
 require_relative 'usb-probe'
 require 'securerandom'
-require 'tempfile'
+require 'digest'
+require 'json'
 require 'zlib'
-require 'tmpdir'
 require 'fileutils'
 require_relative 'usb-directory'
 
 module BrainUsb
   class FileReceiver
-    MAGIC = 'BRNFILE3'.b.freeze
+    MAGIC = 'BRNFILE4'.b.freeze
     CHUNK = 64 * 1024
     MAX_ENCODED = CHUNK + 1024
 
@@ -70,6 +70,7 @@ module BrainUsb
 
     def response(offset, command)
       deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 30
+      retries = 0
       loop do
         while @buffer.bytesize >= 44
           unless @buffer.start_with?(MAGIC)
@@ -79,19 +80,27 @@ module BrainUsb
             break
           end
           position, size, length, kind, raw_length = @buffer.byteslice(16, 28).unpack('Q<2V3')
-          raise 'Invalid file response' unless length <= MAX_ENCODED && [1, 2].include?(kind) && position <= size && raw_length <= CHUNK && raw_length <= size - position
+          raise 'Invalid file response' unless length <= MAX_ENCODED && (0..3).include?(kind) && position <= size && raw_length <= CHUNK && raw_length <= size - position
           break if @buffer.bytesize < 44 + length
           frame = @buffer.slice!(0, 44 + length)
           next unless frame.byteslice(8, 8) == @token
-          next if position < offset || (kind == 1 && command == 2)
+          next if position < offset || (kind != command && position == offset)
           raise 'Unexpected response offset/command' unless position == offset && kind == command
-          expected = command == 1 ? [CHUNK, size - position].min : 0
+          expected = [1, 3].include?(command) ? [CHUNK, size - position].min : 0
           raise 'Invalid file chunk length' unless raw_length == expected
           raise 'Invalid completion response' if command == 2 && length != 0
+          raise 'Invalid digest response' if [0, 3].include?(command) && length != 32
           payload = frame.byteslice(44, length)
-          return [size, command == 1 ? inflate(payload, expected) : ''.b]
+          return [size, command == 1 ? inflate(payload, expected) : payload]
         end
-        raise "Timed out at offset #{offset}; cancel on Brain and restart" if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+        if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+          raise "Timed out at offset #{offset}; partial data is retained. Rerun with the same output to resume" if retries == 2
+          retries += 1
+          @buffer.clear
+          @last_sector = nil
+          request(offset, command)
+          deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 30
+        end
         sector(0xfec, BrainUsb.packet(3, @version))
         status = BrainUsb.decode(sector(0xfec), 0x34)
         raise 'Invalid status length' unless status.bytesize == 4
@@ -112,20 +121,35 @@ module BrainUsb
       end
     end
 
-    def download
+    def download(file, size)
       @started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       @last_report = @started
       offset = 0
-      size = nil
-      loop do
+      saved = file.size
+      raise 'Partial data exceeds source size' if saved > size
+      # A crash can leave a partial block; only complete blocks are resume points.
+      saved = saved / CHUNK * CHUNK unless saved == size
+      file.truncate(saved)
+      file.rewind
+      while offset < saved
+        length = [CHUNK, size - offset].min
+        request(offset, 3)
+        total, digest = response(offset, 3)
+        raise 'Transfer size changed' unless total == size
+        data = file.read(length)
+        raise "Saved data differs at offset #{offset}; keep the partial data or remove it to start over" unless data && data.bytesize == length && Digest::SHA256.digest(data) == digest
+        offset += length
+        progress(offset, size)
+      end
+      while offset < size
         request(offset, 1)
         total, data = response(offset, 1)
-        raise 'Transfer size changed' if size && size != total
-        size = total
-        yield data
+        raise 'Transfer size changed' unless total == size
+        file.write(data)
+        file.flush
+        file.fsync
         offset += data.bytesize
         progress(offset, size)
-        break if offset == size
       end
       size
     end
@@ -141,39 +165,77 @@ module BrainUsb
       @version = Integer(@device.attribute('bcdDevice'), 16)
       destination = File.expand_path(output)
       raise 'Output already exists' if File.exist?(destination) || File.symlink?(destination)
-      if directory
-        # Linux RENAME_NOREPLACE refuses even an empty directory created during reception.
-        Native.extern 'int renameat2(int, const char*, int, const char*, unsigned int)'
-        staging = Dir.mktmpdir('.brain-receive-', File.dirname(destination))
-        writer = DirectoryWriter.new(staging)
-        begin
-          size = download { |data| writer.write(data) }
-          writer.finish
-          acknowledge(size)
-          if Process.uid.zero? && ENV['SUDO_UID'] && ENV['SUDO_GID']
-            File.chown(Integer(ENV.fetch('SUDO_UID')), Integer(ENV.fetch('SUDO_GID')), staging)
+      partial = "#{destination}.brain-part"
+      begin
+        Dir.mkdir(partial, 0o700)
+        File.open(File.dirname(partial)) { |parent| parent.fsync }
+      rescue Errno::EEXIST
+        # Validate the private resume directory before opening anything inside it.
+      end
+      stat = File.lstat(partial)
+      raise 'Unsafe resume directory' unless stat.directory? && stat.uid == Process.euid && stat.mode & 0o077 == 0
+      File.open(File.join(partial, 'lock'), File::RDWR | File::CREAT | File::NOFOLLOW, 0o600) do |lock|
+        raise 'Another receiver is using this output' unless lock.flock(File::LOCK_EX | File::LOCK_NB)
+        request(0, 0)
+        size, identity = response(0, 0)
+        metadata = { 'protocol' => MAGIC, 'directory' => directory, 'size' => size, 'identity' => identity.unpack1('H*') }
+        manifest = File.join(partial, 'metadata.json')
+        if File.exist?(manifest) || File.symlink?(manifest)
+          stored = File.open(manifest, File::RDONLY | File::NOFOLLOW) { |file| JSON.parse(file.read(4096)) }
+          raise 'Transfer source or output mode changed; use another output or remove its .brain-part directory' unless stored == metadata
+        else
+          raise 'Resume metadata is missing' if File.exist?(File.join(partial, 'data'))
+          temporary = "#{manifest}.tmp"
+          File.open(temporary, File::WRONLY | File::CREAT | File::TRUNC | File::NOFOLLOW, 0o600) do |file|
+            file.write(JSON.generate(metadata))
+            file.flush
+            file.fsync
           end
-          if Native.renameat2(-100, staging, -100, destination, 1) != 0
-            raise SystemCallError.new('Publish received folder', Fiddle.last_error)
-          end
-          progress(size, size)
-        ensure
-          writer.close
-          FileUtils.remove_entry(staging) if File.directory?(staging)
+          File.rename(temporary, manifest)
+          File.open(partial) { |folder| folder.fsync }
         end
-      else
-        # Publish only a complete file; link refuses a destination created meanwhile.
-        Tempfile.create(['.brain-receive-', '.part'], File.dirname(destination), binmode: true) do |file|
-          size = download { |data| file.write(data) }
+        data_path = File.join(partial, 'data')
+        File.open(data_path, File::RDWR | File::CREAT | File::NOFOLLOW, 0o600) do |file|
+          file.binmode
+          raise 'Resume data is not a private regular file' unless file.stat.file? && file.stat.nlink == 1
+          File.open(partial) { |folder| folder.fsync }
+          download(file, size)
           file.flush
           file.fsync
           acknowledge(size)
-          if Process.uid.zero? && ENV['SUDO_UID'] && ENV['SUDO_GID']
-            file.chown(Integer(ENV.fetch('SUDO_UID')), Integer(ENV.fetch('SUDO_GID')))
+          if directory
+            staging = File.join(partial, 'extracted')
+            FileUtils.remove_entry(staging) if File.exist?(staging) || File.symlink?(staging)
+            Dir.mkdir(staging, 0o700)
+            writer = DirectoryWriter.new(staging)
+            begin
+              file.rewind
+              while (data = file.read(CHUNK))
+                writer.write(data)
+              end
+              writer.finish
+            ensure
+              writer.close
+            end
+            if Process.uid.zero? && ENV['SUDO_UID'] && ENV['SUDO_GID']
+              File.chown(Integer(ENV.fetch('SUDO_UID')), Integer(ENV.fetch('SUDO_GID')), staging)
+            end
+            File.open(staging) { |folder| folder.fsync }
+            Native.extern 'int renameat2(int, const char*, int, const char*, unsigned int)'
+            if Native.renameat2(-100, staging, -100, destination, 1) != 0
+              raise SystemCallError.new('Publish received folder', Fiddle.last_error)
+            end
+          else
+            if Process.uid.zero? && ENV['SUDO_UID'] && ENV['SUDO_GID']
+              file.chown(Integer(ENV.fetch('SUDO_UID')), Integer(ENV.fetch('SUDO_GID')))
+            end
+            file.fsync
+            File.link(data_path, destination)
           end
-          File.link(file.path, destination)
+          File.open(File.dirname(destination)) { |folder| folder.fsync }
           progress(size, size)
         end
+        FileUtils.remove_entry(partial)
       end
       $stderr.puts
       puts "Saved #{destination}"

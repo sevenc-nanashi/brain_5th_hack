@@ -62,6 +62,7 @@ module BrainUsb
           @file.binmode
           @remaining = size
         end
+        File.open(File.dirname(target)) { |parent| parent.fsync } unless name.empty?
         if !name.empty? && Process.uid.zero? && ENV['SUDO_UID'] && ENV['SUDO_GID']
           File.chown(Integer(ENV.fetch('SUDO_UID')), Integer(ENV.fetch('SUDO_GID')), target)
         end

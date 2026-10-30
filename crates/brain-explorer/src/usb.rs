@@ -1,5 +1,5 @@
 use super::{Device, source::Source};
-use alloc::{format, vec};
+use alloc::{format, vec, vec::Vec};
 use brain_explorer::Explorer;
 use core::{ffi::c_void, ptr};
 use reflex::{
@@ -7,9 +7,10 @@ use reflex::{
     peg::{self, key, raw},
     runtime, text,
 };
+use sha2::{Digest, Sha256};
 
 const TIMER: u32 = 0x5553;
-const MAGIC: &[u8; 8] = b"BRNFILE3";
+const MAGIC: &[u8; 8] = b"BRNFILE4";
 const CHUNK: usize = 64 * 1024;
 const MAX_ENCODED: usize = CHUNK + 1024;
 
@@ -77,6 +78,23 @@ fn word(bytes: &[u8]) -> u32 {
     u32::from_le_bytes(bytes.try_into().unwrap())
 }
 
+// PCConnect disables these power transitions while connected; see docs/power.md.
+struct PowerInhibit(u32);
+impl PowerInhibit {
+    fn new() -> Self {
+        let call: unsafe extern "C" fn(u32, u32) -> u32 =
+            unsafe { core::mem::transmute(0x8401_0080usize) };
+        Self(unsafe { call(7, 0) })
+    }
+}
+impl Drop for PowerInhibit {
+    fn drop(&mut self) {
+        let call: unsafe extern "C" fn(u32, u32) -> u32 =
+            unsafe { core::mem::transmute(0x8401_0080usize) };
+        unsafe { call(self.0, 1) };
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum State {
     Browsing,
@@ -90,11 +108,15 @@ enum State {
 }
 
 struct Transfer {
+    name: Vec<u8>,
+    file_size: u32,
+    directory: bool,
     file: Source,
     size: u64,
     next: u64,
     token: Option<[u8; 8]>,
     last: Option<[u8; 28]>,
+    response: Vec<u8>,
     input: [u8; 28],
     received: usize,
 }
@@ -110,17 +132,26 @@ impl Transfer {
             return Err("Invalid PC request");
         }
         if self.last == Some(input) {
+            if transfer(0x20035, &mut self.response)? != self.response.len() {
+                return Err("USB resend incomplete");
+            }
             return Ok(None);
         }
         let token: [u8; 8] = input[8..16].try_into().unwrap();
-        if let Some(current) = self.token
-            && token != current
-        {
-            return Err("PC session changed. Cancel and retry");
-        }
         let offset = u64::from_le_bytes(input[16..24].try_into().unwrap());
         let command = word(&input[24..28]);
-        if offset != self.next || !matches!(command, 1 | 2) {
+        if command == 0 {
+            if offset != 0 {
+                return Err("Invalid handshake offset");
+            }
+            self.file = Source::new(&self.name, self.file_size, self.directory)?;
+            self.size = self.file.size;
+            self.next = 0;
+            self.token = Some(token);
+        } else if self.token != Some(token) {
+            return Err("Handshake required");
+        }
+        if offset != self.next || !matches!(command, 0..=3) {
             return Err("Invalid file request offset");
         }
         if command == 2 && offset != self.size {
@@ -132,7 +163,7 @@ impl Transfer {
         response[16..24].copy_from_slice(&offset.to_le_bytes());
         response[24..32].copy_from_slice(&self.size.to_le_bytes());
         response[36..40].copy_from_slice(&command.to_le_bytes());
-        let length = if command == 1 {
+        let length = if matches!(command, 1 | 3) {
             (self.size - offset).min(CHUNK as u64) as usize
         } else {
             0
@@ -149,16 +180,28 @@ impl Transfer {
             }
             read += count;
         }
-        if offset + length as u64 == self.size {
+        if command != 0 && offset + length as u64 == self.size {
             let mut extra = [0];
             if self.file.read(&mut extra).map_err(|_| "Cannot read file")? != 0 {
                 return Err("File size changed. Cancel and retry");
             }
         }
-        let encoded = if command == 1 {
-            unsafe { super::compression::encode_block(&raw, &mut response[44..]) }
-        } else {
-            0
+        let encoded = match command {
+            0 => {
+                // shortcut: path/size identity is not a snapshot; keep sources unchanged during transfer.
+                let mut identity = Sha256::new();
+                identity.update([u8::from(self.directory)]);
+                identity.update(&self.name);
+                identity.update(self.size.to_le_bytes());
+                response[44..76].copy_from_slice(&identity.finalize());
+                32
+            }
+            1 => unsafe { super::compression::encode_block(&raw, &mut response[44..]) },
+            3 => {
+                response[44..76].copy_from_slice(&Sha256::digest(&raw));
+                32
+            }
+            _ => 0,
         };
         response[32..36].copy_from_slice(&(encoded as u32).to_le_bytes());
         response[40..44].copy_from_slice(&(length as u32).to_le_bytes());
@@ -167,7 +210,8 @@ impl Transfer {
         // Record the request before firmware calls that could dispatch another PEG message.
         self.last = Some(input);
         self.token = Some(token);
-        if transfer(0x20035, &mut response)? != response.len() {
+        self.response = response;
+        if transfer(0x20035, &mut self.response)? != self.response.len() {
             return Err("USB send incomplete");
         }
         self.next += length as u64;
@@ -182,6 +226,7 @@ pub struct Sender {
     since: u64,
     message: &'static str,
     transfer: Option<Transfer>,
+    power_inhibit: Option<PowerInhibit>,
     exit: bool,
     cancel_pressed: bool,
 }
@@ -194,6 +239,7 @@ impl Sender {
             since: 0,
             message: "",
             transfer: None,
+            power_inhibit: None,
             exit: false,
             cancel_pressed: false,
         }
@@ -204,17 +250,24 @@ impl Sender {
         self.since = unsafe { runtime::micros() };
     }
     fn start(&mut self, name: &[u8], size: u32, directory: bool) -> Result<(), &'static str> {
+        let power_inhibit = PowerInhibit::new();
         let file = Source::new(name, size, directory)?;
+        let file_size = size;
         let size = file.size;
         self.transfer = Some(Transfer {
+            name: name.to_vec(),
+            file_size,
+            directory,
             file,
             size,
             next: 0,
             token: None,
             last: None,
+            response: Vec::new(),
             input: [0; 28],
             received: 0,
         });
+        self.power_inhibit = Some(power_inhibit);
         self.set(State::Detaching, "Switching USB...");
         if !request(0x2002c) {
             return Err("USB disconnect failed");
@@ -267,17 +320,18 @@ impl Sender {
                 }
                 self.set(State::Ready, "Waiting for PC receiver...");
             }
-            State::Ready => {
+            State::Ready | State::Done => {
                 if !connected() {
                     return Err("USB disconnected");
                 }
+                let waiting = self.state;
                 self.state = State::Busy;
                 let result = self.transfer.as_mut().unwrap().poll()?;
-                self.state = State::Ready;
+                self.state = waiting;
                 match result {
                     Some(true) => self.set(State::Done, "Received on PC"),
                     Some(false) => self.set(State::Ready, "Sending..."),
-                    None if elapsed > 120_000_000 => {
+                    None if waiting == State::Ready && elapsed > 120_000_000 => {
                         return Err("PC receiver timeout. Esc to disconnect");
                     }
                     None => return Ok(Action::None),
@@ -285,6 +339,7 @@ impl Sender {
             }
             State::Stopping if elapsed >= 2_000_000 && !connected() => {
                 self.transfer = None;
+                self.power_inhibit = None;
                 self.set(State::Browsing, "");
                 if self.exit {
                     return Ok(Action::Exit);

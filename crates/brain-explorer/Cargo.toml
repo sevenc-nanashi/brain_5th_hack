@@ -7,6 +7,7 @@ edition.workspace = true
 device = ["reflex/application", "reflex/panic-qr"]
 
 [dependencies]
+sha2 = { version = "0.10", default-features = false }
 miniz_oxide = { version = "0.8.9", default-features = false, features = ["with-alloc"] }
 reflex = { path = "../reflex", features = ["text"] }
 
@@ -17,4 +18,4 @@ required-features = ["device"]
 [package.metadata.reflex]
 name = "Explorer"
 output = "explorer"
-assets = ["../reflex/assets/FONT-LICENSE.txt", "assets/COMPRESSION-LICENSE.txt"]
+assets = ["../reflex/assets/FONT-LICENSE.txt", "assets/COMPRESSION-LICENSE.txt", "assets/HASH-LICENSE.txt"]
