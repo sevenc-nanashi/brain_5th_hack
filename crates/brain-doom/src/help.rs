@@ -13,7 +13,7 @@ pub fn paint(pixels: &mut [u16]) {
         pixels,
         48,
         60,
-        "Top row: F1-F6    Shift + top row: F7-F12",
+        "Top keys: F1-F6    Shift + top keys: F7-F12",
         0x9e7f,
     );
     let left = [
@@ -25,7 +25,7 @@ pub fn paint(pixels: &mut [u16]) {
         "QWERTYU  Weapons 1-7",
         "Del      Menu / Back",
         "Symbol   Map",
-        "Audio    Pause",
+        "Audio    Sound on/off",
         "PgUp/Dn  Host volume",
     ];
     let right = [
@@ -37,12 +37,12 @@ pub fn paint(pixels: &mut [u16]) {
         "F10      Quit (Y / N)",
         "F11      Brightness",
         "F12      Controls",
-        "F2/3/6/9 Save: unavailable",
-        "",
+        "F2 / F3  Save / Load",
+        "F6 / F9  Quick save/load",
     ];
     for (row, (a, b)) in left.iter().zip(right).enumerate() {
         text(pixels, 48, 100 + row * 29, a, 0xffff);
-        text(pixels, 416, 104 + row * 32, b, 0xffff);
+        text(pixels, 416, 100 + row * 29, b, 0xffff);
     }
     text(pixels, 48, 420, "F12 / Del: Close", 0x9e7f);
 }
@@ -65,12 +65,14 @@ fn text(pixels: &mut [u16], x: usize, y: usize, value: &str, color: u16) {
     }
 }
 
-pub fn audio_reset(pixels: &mut [u16], done: bool) {
+pub fn audio_reset(pixels: &mut [u16], done: bool, enabled: bool) {
     text(
         pixels,
         48,
         392,
-        if done {
+        if !enabled {
+            "Audio: OFF"
+        } else if done {
             "R: Reset audio (OK)"
         } else {
             "R: Reset audio"

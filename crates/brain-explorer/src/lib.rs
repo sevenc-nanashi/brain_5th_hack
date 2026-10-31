@@ -497,7 +497,7 @@ impl<F: Filesystem> Application for Explorer<F> {
 }
 
 fn roots() -> Vec<Entry> {
-    [b"SD0:".as_slice(), b"ROM:"]
+    [b"SD0:".as_slice(), b"ROM:", b"USR:", b"SYS:", b"AKM:"]
         .into_iter()
         .map(|name| Entry {
             name: name.to_vec(),

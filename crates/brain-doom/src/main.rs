@@ -3,7 +3,7 @@
 use brain_doom::{doom_key, engine, help, paint};
 use core::{arch::global_asm, ffi::c_void, ptr};
 use reflex::{
-    Action, Application, Event, Window, display,
+    Action, Application, Window, display,
     peg::{self, raw},
     runtime,
 };
@@ -32,10 +32,16 @@ struct Doom {
     function_keys: [i32; 6],
     volume_keys: u8,
     redraw: bool,
+    audio_enabled: bool,
+    audio_toggle_held: bool,
+    save_error: Option<&'static str>,
 }
 #[reflex::main]
 fn main() -> Doom {
-    Doom::default()
+    Doom {
+        audio_enabled: true,
+        ..Doom::default()
+    }
 }
 unsafe extern "C" {
     fn on_engine_stack(call: unsafe extern "C" fn() -> i32, top: *mut u8) -> i32;
@@ -78,6 +84,27 @@ impl Doom {
                         return Some(Action::None);
                     }
                     let pressed = msg.kind != peg::PM_KEY_UP;
+                    if msg.param == peg::key::AUDIO {
+                        if !pressed {
+                            self.audio_toggle_held = false;
+                        } else if !self.audio_toggle_held && self.started && !self.failed {
+                            self.audio_toggle_held = true;
+                            let ok = if self.audio_enabled {
+                                audio::shutdown()
+                            } else {
+                                audio::init(window)
+                            };
+                            if ok {
+                                self.audio_enabled = !self.audio_enabled;
+                            } else {
+                                self.failed = true;
+                                audio::shutdown();
+                            }
+                            self.redraw = true;
+                        }
+                        return Some(Action::None);
+                    }
+
                     let reset_key = matches!(msg.param, 0x52 | 0x72);
                     if reset_key && !pressed {
                         self.audio_reset_held = false;
@@ -109,7 +136,7 @@ impl Doom {
                                 self.function_keys[index] = key;
                                 if number == 11 {
                                     self.toggle_help();
-                                } else if !self.help && !matches!(number, 1 | 2 | 5 | 8) {
+                                } else if !self.help {
                                     engine::key(key, true);
                                 }
                             }
@@ -125,7 +152,7 @@ impl Doom {
                     if self.help && pressed {
                         if matches!(msg.param, peg::key::BACKSPACE | peg::key::ESCAPE) {
                             self.toggle_help();
-                        } else if reset_key && !self.audio_reset_held {
+                        } else if reset_key && self.audio_enabled && !self.audio_reset_held {
                             self.audio_reset_held = true;
                             if !audio::reset(window) {
                                 self.failed = true;
@@ -147,7 +174,9 @@ impl Doom {
                     return Some(Action::None);
                 }
                 reflex::audio::PM_AUDIO => {
-                    if !self.failed
+                    if self.started
+                        && self.audio_enabled
+                        && !self.failed
                         && msg.param == reflex::audio::BUFFER_CONSUMED
                         && !audio::refill(msg.data.ext_params[0])
                     {
@@ -161,7 +190,7 @@ impl Doom {
                     if self.failed {
                         return Some(Action::None);
                     }
-                    if self.started && !audio::maintain(window) {
+                    if self.started && self.audio_enabled && !audio::maintain(window) {
                         self.failed = true;
                         audio::shutdown();
                         self.redraw = true;
@@ -186,7 +215,7 @@ impl Doom {
                     } else {
                         self.started = true;
                         let result = run(engine::init);
-                        let result = if result == 0 && !audio::init(window) {
+                        let result = if result == 0 && self.audio_enabled && !audio::init(window) {
                             -1
                         } else {
                             result
@@ -196,6 +225,9 @@ impl Doom {
                         self.last_frame_us = 0;
                         result
                     };
+                    if let Some(result) = brain_doom::files::take_status() {
+                        self.save_error = result.err();
+                    }
                     if result == 1 {
                         return Some(Action::Exit);
                     }
@@ -305,7 +337,7 @@ impl Application for Doom {
             action
         }
     }
-    fn event(&mut self, _: Event) -> Action {
+    fn event(&mut self, _: reflex::Event) -> Action {
         Action::None
     }
     fn can_exit(&mut self) -> bool {
@@ -336,9 +368,28 @@ impl Application for Doom {
                 help::paint(pixels);
                 let (mix_ms, state, submits) = audio::diagnostics();
                 help::audio_status(pixels, mix_ms, state, submits);
-                help::audio_reset(pixels, self.audio_reset_done);
+                help::audio_reset(pixels, self.audio_reset_done, self.audio_enabled);
             } else {
-                help::performance(pixels, self.fps, audio::max_fill_ms());
+                help::performance(
+                    pixels,
+                    self.fps,
+                    if self.audio_enabled {
+                        audio::max_fill_ms()
+                    } else {
+                        0
+                    },
+                );
+            }
+            if let Some(error) = self.save_error {
+                reflex::text::draw(
+                    |x, y, c| pixels[y * display::WIDTH + x] = c,
+                    16,
+                    448,
+                    error,
+                    0xffff,
+                    0xa900,
+                    1,
+                );
             }
         }
     }

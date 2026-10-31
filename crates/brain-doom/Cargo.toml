@@ -8,7 +8,7 @@ engine = ["reflex/experimental-runtime"]
 device = ["engine", "reflex/application"]
 
 [dependencies]
-reflex = { path = "../reflex" }
+reflex = { path = "../reflex", features = ["text", "storage"] }
 
 [[bin]]
 name = "brain-doom"

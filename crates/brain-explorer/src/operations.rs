@@ -1,9 +1,20 @@
 use super::*;
 
 pub(super) const MENU: [&str; 6] = ["Copy", "Cut", "Paste", "Rename", "Delete", "New folder"];
+pub(super) const SYMBOL_KEYS: &[u8] = b"QWERTYUIOPASDFGHJKLZXCVBNM";
+pub(super) const SYMBOLS: &[u8] = b"_-.()[]{}!#$%&'+,;=@^`~";
+pub(super) enum InputMode {
+    Letters,
+    Numbers,
+    Symbols,
+}
 pub(super) enum Dialog {
     Menu(usize),
-    Name { rename: bool, name: String },
+    Name {
+        rename: bool,
+        name: String,
+        mode: InputMode,
+    },
     Delete,
 }
 #[derive(Clone)]
@@ -71,6 +82,7 @@ impl<F: Filesystem> Explorer<F> {
                 self.dialog = Some(Dialog::Name {
                     rename: index == 3,
                     name: String::new(),
+                    mode: InputMode::Letters,
                 })
             }
             4 => self.dialog = Some(Dialog::Delete),
@@ -138,7 +150,7 @@ impl<F: Filesystem> Explorer<F> {
     }
     fn confirm_operation(&mut self) -> Result<Action, &'static str> {
         match self.dialog.as_ref() {
-            Some(Dialog::Name { rename, name }) => {
+            Some(Dialog::Name { rename, name, .. }) => {
                 if name.is_empty() || name == "." || name == ".." || name.ends_with(['.', ' ']) {
                     return Err("Enter a name without a trailing dot or space");
                 }
@@ -260,22 +272,47 @@ impl<F: Filesystem> Explorer<F> {
                 }
                 _ => return Action::None,
             },
-            Some(Dialog::Name { name, .. }) => {
+            Some(Dialog::Name { name, mode, .. }) => {
                 if code == key::ENTER {
                     return self.activate(Control::Confirm);
                 }
-                if code == key::BACKSPACE || code == 0x7f {
+                if code == key::INPUT_MODE {
+                    *mode = match mode {
+                        InputMode::Letters => InputMode::Numbers,
+                        InputMode::Numbers => InputMode::Symbols,
+                        InputMode::Symbols => InputMode::Letters,
+                    };
+                } else if code == key::BACKSPACE || code == 0x7f {
                     name.pop();
                 } else if (32..=126).contains(&code) {
                     let mut byte = code as u8;
                     if byte.is_ascii_alphabetic() {
-                        byte = if flags & reflex::peg::KMOD_SHIFT != 0 {
-                            byte.to_ascii_uppercase()
-                        } else {
-                            byte.to_ascii_lowercase()
+                        byte = match mode {
+                            InputMode::Letters => {
+                                if flags & reflex::peg::KMOD_SHIFT != 0 {
+                                    byte.to_ascii_uppercase()
+                                } else {
+                                    byte.to_ascii_lowercase()
+                                }
+                            }
+                            InputMode::Numbers | InputMode::Symbols => {
+                                let (keys, values) = match mode {
+                                    InputMode::Numbers => (&b"QWERTYUIOP"[..], &b"1234567890"[..]),
+                                    InputMode::Symbols => (SYMBOL_KEYS, SYMBOLS),
+                                    InputMode::Letters => unreachable!(),
+                                };
+                                let Some((_, value)) = keys
+                                    .iter()
+                                    .zip(values)
+                                    .find(|(key, _)| **key == byte.to_ascii_uppercase())
+                                else {
+                                    return Action::None;
+                                };
+                                *value
+                            }
                         };
                     }
-                    if (byte.is_ascii_alphanumeric() || b" _-.()".contains(&byte))
+                    if (byte.is_ascii_alphanumeric() || byte == b' ' || SYMBOLS.contains(&byte))
                         && name.len() < 255
                     {
                         name.push(byte as char);

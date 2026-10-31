@@ -25,6 +25,13 @@ def patched(source, output, replacements, expected: 1)
   output
 end
 lua_api = patched(File.join(tic, 'src/api/lua.c'), File.join(out, 'lua-api.c'), {
+  'return (s32)lua_tonumber(lua, index);' => <<~C.strip,
+    if (lua_isinteger(lua, index)) {
+        lua_Integer value = lua_tointeger(lua, index);
+        if (value >= INT32_MIN && value <= INT32_MAX) return (s32)value;
+    }
+    return (s32)lua_tonumber(lua, index);
+  C
   'lua_State* lua = core->currentVM = luaL_newstate();' => <<~C.strip
     lua_State* lua = core->currentVM = luaL_newstate();
     if (!lua) { core->data->error(core->data->data, "Lua allocation failed"); return false; }
@@ -39,15 +46,20 @@ core = patched(File.join(tic, 'src/core/core.c'), File.join(out, 'core.c'), {
 cart = patched(File.join(tic, 'src/cart.c'), File.join(out, 'cart.c'), {
   'const Chunk* chunk = (Chunk*)ptr;' => 'Chunk header; memcpy(&header, ptr, sizeof header); const Chunk* chunk = &header;'
 }, expected: 2)
+# Count-only hooks need the slow path only when the instruction budget expires.
+lua_vm = patched(File.join(lua, 'lvm.c'), File.join(out, 'lvm.c'), {
+  'Protect(luaG_traceexec(L));' => 'if ((L->hookmask & LUA_MASKLINE) || L->hookcount <= 1) { Protect(luaG_traceexec(L)); } else { --L->hookcount; }'
+})
 flags = %w[-std=gnu11 -O2 -fno-strict-aliasing -fwrapv -ffunction-sections -fdata-sections -DTIC_BUILD_WITH_LUA=1 -DLUA_COMPAT_5_2]
 [File.join(tic, 'include'), File.join(tic, 'src'), File.join(tic, 'src/core'), lua, blip, zlib].each { |d| flags += ['-I', d] }
 if target == 'arm'
-  flags += %w[--target=armv7a-none-eabi -mcpu=cortex-a7 -mfloat-abi=soft -marm -ffreestanding -fno-builtin -fno-stack-protector -DBRAIN_ARM]
+  flags += %w[--target=armv7a-none-eabi -mcpu=cortex-a7 -mfloat-abi=soft -marm -ffreestanding -fno-builtin -fno-stack-protector -flto=thin -DBRAIN_ARM]
   flags += ['-isystem', File.join(inputs, 'newlib/usr/include/newlib')]
 end
 sources = %w[core/languages.c core/draw.c core/io.c core/sound.c tools.c zip.c tilesheet.c].map { |f| File.join(tic, 'src', f) }
 sources += [core, cart, lua_api, File.join(blip, 'blip_buf.c'), File.join(port, 'engine/bridge.c')]
 sources += Dir.glob(File.join(lua, '*.c')).reject { |p| %w[lua.c onelua.c ltests.c].include?(File.basename(p)) }
+sources[sources.index(File.join(lua, 'lvm.c'))] = lua_vm
 sources += %w[adler32.c crc32.c inffast.c inflate.c inftrees.c uncompr.c zutil.c].map { |f| File.join(zlib, f) }
 sources << File.join(port, 'engine/runtime.c') if target == 'arm'
 objects = sources.each_with_index.map do |source, i|

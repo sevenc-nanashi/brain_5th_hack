@@ -3,11 +3,45 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
+#include <time.h>
 
 extern void *tic_alloc(size_t);
 extern void tic_free(void *);
 extern void *tic_realloc(void *, size_t);
 extern void tic_panic(void) __attribute__((noreturn));
+
+int _gettimeofday(struct timeval *tv, void *tz) {
+    // V690_H1 control 0x30013 reads the local RTC; see docs/clock.md.
+    struct {
+        uint16_t year, month, weekday, day, hour, minute, second, millisecond;
+    } rtc;
+    _Static_assert(sizeof(rtc) == 16, "RTC ABI");
+    int (*control)(uint32_t, const void *, uint32_t, void *, uint32_t, uint32_t *) =
+        (void *)0x600063c0;
+    if (control(0x30013, NULL, 0, &rtc, sizeof(rtc), NULL) != 1) {
+        errno = EIO;
+        return -1;
+    }
+    struct tm date = {
+        .tm_year = rtc.year - 1900,
+        .tm_mon = rtc.month - 1,
+        .tm_mday = rtc.day,
+        .tm_hour = rtc.hour,
+        .tm_min = rtc.minute,
+        .tm_sec = rtc.second,
+        .tm_isdst = 0,
+    };
+    // Newlib's default zone is UTC. The Brain clock is set to Japanese local time.
+    time_t seconds = mktime(&date);
+    if (seconds == (time_t)-1) {
+        errno = EOVERFLOW;
+        return -1;
+    }
+    tv->tv_sec = seconds - 9 * 60 * 60;
+    tv->tv_usec = rtc.millisecond * 1000;
+    return 0;
+}
 
 // TIC-80 has unchecked allocations; stop safely instead of dereferencing NULL.
 void *malloc(size_t size) {

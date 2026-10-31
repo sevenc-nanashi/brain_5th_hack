@@ -26,6 +26,9 @@ reflex = { path = "../reflex" }
 
 デバイスを操作する API は `arm` + `target_os = "none"` でのみ公開する。
 `fs` は読み取り専用の `File` / `Directory` を提供する（`experimental-runtime`）。
+`storage` featureでは、アプリ用の `storage::Store` を有効にする。保存先の親フォルダーを作成し、
+チェックサム付きJSONを2世代で保持する。書き込み失敗時は直前の正常な世代を残す。
+TIC-80の履歴・pmemとDoomのセーブ・設定で共有する。ホストでは通常のファイルを使って確認できる。
 V690_H1 の静的解析に基づき、実機未確認。ABI の根拠と制限は [ファイル操作 API](../../docs/filesystem.md) を参照。
 音声 ABI と内部バッファ長の変更に関する制約は [音声解析メモ](../../docs/audio.md) を参照。
 型・定数・座標変換はホストでも使える。ポインターを含む ABI 型の配置は

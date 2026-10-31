@@ -133,6 +133,7 @@ const u32 *brain_tic_screen(void) { return memory ? memory->product.screen : NUL
 const char *brain_tic_error(void) { return error_text; }
 int brain_tic_result(void) { return result; }
 uint64_t brain_tic_frames(void) { return frames; }
+u32 *brain_tic_pmem(void) { return memory ? memory->ram->persistent.data : NULL; }
 void brain_tic_close(void) {
     if (memory) tic_core_close(memory);
     memory = NULL;

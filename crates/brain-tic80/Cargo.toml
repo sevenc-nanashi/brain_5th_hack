@@ -8,8 +8,11 @@ engine = []
 device = ["engine", "reflex/application", "reflex/panic-qr", "brain-explorer/device"]
 
 [dependencies]
+serde = { version = "1.0", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
+sha2 = { version = "0.10", default-features = false }
 brain-explorer = { path = "../brain-explorer" }
-reflex = { path = "../reflex", features = ["text"] }
+reflex = { path = "../reflex", features = ["text", "storage"] }
 
 [[bin]]
 name = "brain-tic80"

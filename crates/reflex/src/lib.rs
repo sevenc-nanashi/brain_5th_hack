@@ -4,6 +4,9 @@
 //! See the crate README for verification status and startup requirements.
 #![no_std]
 
+#[cfg(feature = "storage")]
+pub mod storage;
+
 pub mod app;
 pub mod display;
 pub mod peg;

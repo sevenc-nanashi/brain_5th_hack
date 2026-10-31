@@ -108,8 +108,14 @@ pub unsafe fn refill(index: i32) -> bool {
         return false;
     }
     unsafe {
-        if HANDLE.is_null() || !fill(index as usize) || !audio::submit(HANDLE, index as u32, BYTES)
-        {
+        if HANDLE.is_null() {
+            return false;
+        }
+        // Reopening the device can leave old notifications queued; preserve unconsumed audio.
+        if audio::cursors(HANDLE)[index as usize] != BYTES {
+            return true;
+        }
+        if !fill(index as usize) || !audio::submit(HANDLE, index as u32, BYTES) {
             return false;
         }
         SUBMITS = SUBMITS.saturating_add(1);

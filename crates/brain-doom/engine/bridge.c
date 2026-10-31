@@ -23,6 +23,7 @@ extern void brain_free(void *);
 extern void *brain_open(const char *, const char *);
 extern void brain_close(void *);
 extern int brain_read(void *, void *, int);
+extern int brain_write(void *, const void *, int);
 extern int brain_seek(void *, int, doom_seek_t);
 extern int brain_tell(void *);
 extern int brain_eof(void *);
@@ -42,10 +43,6 @@ static void *allocate(int size) {
     }
     return ptr;
 }
-static int read_only(void *handle, const void *data, int count) {
-    (void)handle; (void)data; (void)count;
-    return -1;
-}
 static char *environment(const char *name) {
     (void)name;
     return ".";
@@ -55,7 +52,7 @@ int brain_doom_init(void) {
     if (CHECKPOINT()) return exit_status;
     doom_set_print(brain_print);
     doom_set_malloc(allocate, brain_free);
-    doom_set_file_io(brain_open, brain_close, brain_read, read_only,
+    doom_set_file_io(brain_open, brain_close, brain_read, brain_write,
                      brain_seek, brain_tell, brain_eof);
     doom_set_gettime(brain_time);
     doom_set_exit(stop);

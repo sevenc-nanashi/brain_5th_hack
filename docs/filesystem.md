@@ -122,3 +122,78 @@ modeの `0xf000` 部分が `0x4000` ならディレクトリー。
 Explorerは変更前にSD0配下かを確認し、保存先が存在すれば拒否する。空フォルダー削除も列挙で確認し、再帰削除は行わない。
 存在確認からrenameまでを一体化した排他的操作ではないため、処理中に他のアプリ・PCから変更しない。
 列挙APIのEOF／エラーの曖昧さは残る。実機での非空フォルダー拒否・カード障害時の戻り値は別途検証が必要。
+
+## 純正アプリのデータ保存パス
+
+V690_H1 の展開済み `packages/001/ROM` にある純正アプリ14個、
+その展開済みRAM初期値、`DicMain.bin`、`SharpLib.bin`、`system.bin` を調査した。
+下記のオフセットは、特記しない限り各アプリの `AppMain.bin` 内のファイル位置。
+保存済みの実機ファイルを取得した結果ではない。
+
+### 保存先の分かれ方
+
+- `USR:`：カレンダー、ローマ字練習、ノートなどのユーザーデータで使われる。
+- `SYS:`：電卓・時間割・タイマー・録音の設定などで使われる。
+- `SD0:`：SDカード。ノート・録音には `USR:` と `SD0:` の両方のパスがある。
+- `AKM:`：`DicMain.bin` と SetMenu に `AKM:\TMEMO` がある。データ内容は未確定。
+- `ROM:`：アプリ本体と同梱リソース。アプリの配置場所がそのまま保存先になるわけではない。
+
+これは使用例による分類であり、ドライブごとの用途を網羅した定義ではない。
+`system.bin:0xcdf5c`～`0xcdf7c` に `ROM:` / `SYS:` / `LOG:` / `AKM:` / `USR:`、
+直後に `file_system_init()` と `emmc0*` の文字列がある。
+USB側にも各ドライブの別モードが存在する（[USB解析](usb.md#pc側はusb-mass-storage)）。
+物理パーティションとの対応や容量、アクセス権は今回確定していない。
+
+### アプリ別のパス
+
+「文字列」はバイナリ内での存在確認、「読み書き」は呼び出し経路まで確認したもの。
+UTF-16LEのパスも含まれるため、ASCII文字列検索だけでは見落とす。
+
+| アプリ | パス | 根拠・確認範囲 |
+| --- | --- | --- |
+| Calendar | `USR:\Calendar\calendar.bin` | `0x8955c`。読み書きを確認、下記参照 |
+| Calendar | `USR:\Calendar\%04d%02d%02d%02d.dat` | `0x83c88` の書式文字列。各数値の意味は未確定 |
+| Calc | `SYS:\ToolsApp\calc.ini` | `0x155688`。読み書きを確認、下記参照 |
+| SchoolTimetable | `SYS:\ToolsApp\SchoolTimetable\SchoolTimetable.ini` | `0x545b8` の文字列 |
+| CDTimer | `SYS:\ToolsApp\CDTimer\setting.dat` | `0xa5120` のUTF-16LE文字列。親ディレクトリーのASCII文字列も `0xaa5e4` / `0xaa5f4` に存在 |
+| RomanTyping | `USR:\RomanTyping\RomanTyping.dat` | `0x103e0` のUTF-16LE文字列。`0x22810`～`0x22814` で親ディレクトリーをmkdirへ渡す |
+| VoiceRec | `SYS:\VoiceMemoSetting.dat` | `0xd9030` のUTF-16LE文字列 |
+| VoiceRec | `USR:VoiceMemo\` / `SD0:VoiceMemo\` | `0xd8e28` / `0xd8e18` の文字列。`0xd8f20` に `%04d%02d%02d%02d%02d%02d.WAV`。コロン直後に区切りがない表記は原文どおり |
+| eNote | `USR:\NOTE\` / `SD0:\NOTE\` | `0x10150` / `0x1015c` の文字列 |
+| WritingBoard | `SYS:\ToolsApp\WritingBoard` | `0x1084` のUTF-16LE文字列。別途 `USR:\` / `SD0:\` と `\WritingBoard` もあるが、結合・選択条件は未追跡 |
+| pvss | `SYS:\SYSTEM.BOX` / `SYS:\ListeningSet.BOX` | `0x2108e4` / `0x218694` の文字列 |
+| pvss | `USR:\TELOP\` / `SYS:\TELOP\` / `SD0:\TELOP\` | `0x22f094` / `0x22f0a0` / `0x22f0ac` の文字列。入力コンテンツと保存データの区別は未確定 |
+| SetMenu | `SYS:\setmenu\` 内のフラグ類 | `0x23c6c` に `userdatasetting_flg`、`0x23ca0` に `TOOLlParam`、`0x28ccc` に `userdatadel_flg` |
+| SetMenu | `SD0:\SHDicBackup` | `0x3cfc4` の文字列。バックアップの対象範囲・形式は未確定 |
+
+ATR_UGには `%sATR\ATR_CALL_5000\UserData0.zda`（`0x123e8`）と
+`%sATR\ATR_CALL_COCET\UserData0.zda`（`0x1240c`）があるが、先頭の `%s` は未追跡。
+FirstTOEICとrekikenも今回の調査では保存先の絶対パスを確定していない。
+`RD1:\temp.pic` / `RD1:\temp.gif` は見つかったが、永続保存先とは判定していない。
+
+### 読み書きまで確認した経路
+
+Calendarの `0x89384` は `calendar.bin` をstat後に `r+b` で開き、
+`fread(buffer, 16, count, file)` で読み込む。
+`0x893e0` は同じパスを `w+b` で開き、`0x89408` で
+`fwrite(buffer, 16, count, file)`、`0x89410` でcloseする。
+`0x87d5c` / `0x87d64` / `0x87d84` / `0x87d6c` のジャンプ先はそれぞれ
+公開入口 `0x60006400` / `0x6000640c` / `0x60006410` / `0x60006404`。
+少なくともこのファイルは16バイト単位のレコード列として扱われる。フィールドの意味は未解析。
+
+Calcの `0x155678` は固定パス `SYS:\ToolsApp\calc.ini` を返す。
+読み込み側は `0x152f20` → `0x15362c` で `rb`、
+書き込み側は `0x152f40` → `0x1536fc` で `wb` を使う。
+書き込み前に `0x153744`～`0x153748` で `SYS:\ToolsApp` のmkdirを呼ぶ。
+`0x15379c` と `0x1537b4` はデータ本体と追加2バイトをfwriteへ渡す。
+拡張子は `.ini` だが、一般的なテキストINIとして編集できるとは限らない。
+
+### Explorerとの関係と未確認事項
+
+Explorerのルートに `SD0:` / `ROM:` に加えて `USR:` / `SYS:` / `AKM:` を追加した。
+本体側の保存先も既存の列挙・閲覧・USB送信を利用できる。書き込み先は従来どおり `SD0:` に限定する。
+本体側ドライブの実機での列挙と実ファイルの取得は未確認。
+設定ファイルの直接編集や削除は、形式と復旧方法を確認してから行う。
+
+実機でのファイルの存在、保存タイミング、SD未挿入時の挙動、ドライブ間の切り替え条件、
+設定・履歴の完全なバックアップ手順は未確認。

@@ -1,5 +1,7 @@
 #![no_std]
+extern crate alloc;
 pub mod debug;
+pub mod home;
 
 pub const WIDTH: usize = 256;
 pub const HEIGHT: usize = 144;
@@ -112,6 +114,7 @@ pub mod engine {
         pub fn brain_tic_error() -> *const c_char;
         pub fn brain_tic_result() -> i32;
         pub fn brain_tic_frames() -> u64;
+        pub fn brain_tic_pmem() -> *mut u32;
         pub fn brain_tic_close();
     }
 }

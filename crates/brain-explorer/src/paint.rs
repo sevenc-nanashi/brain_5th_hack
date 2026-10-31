@@ -1,3 +1,4 @@
+use super::operations::{InputMode, SYMBOL_KEYS, SYMBOLS};
 use super::*;
 
 const BG: u16 = 0xf7bd;
@@ -366,7 +367,7 @@ fn operations<F: Filesystem>(app: &Explorer<F>, c: &mut Canvas<'_>) {
                     }
                 }
             }
-            Dialog::Name { rename, name } => {
+            Dialog::Name { rename, name, mode } => {
                 c.text(
                     16,
                     104,
@@ -378,16 +379,40 @@ fn operations<F: Filesystem>(app: &Explorer<F>, c: &mut Canvas<'_>) {
                     c.text(16, 150, &shorten(&escaped(&entry.name), 125), MUTED, 1);
                 }
                 c.text(16, 190, "Name", INK, 1);
+                c.text(
+                    700,
+                    184,
+                    match mode {
+                        InputMode::Letters => "ABC",
+                        InputMode::Numbers => "123",
+                        InputMode::Symbols => "SYM",
+                    },
+                    ACCENT,
+                    2,
+                );
                 c.rect(16, 216, 768, 48, WHITE);
                 let start = name.len().saturating_sub(60);
                 c.text(28, 226, &format!("{}_", &name[start..]), INK, 2);
-                c.text(
-                    16,
-                    282,
-                    "Letters, numbers, spaces and _ - . ( )    Shift for uppercase",
-                    MUTED,
-                    1,
-                );
+                c.text(16, 282, "A1  ABC / 123 / SYM", MUTED, 1);
+                match mode {
+                    InputMode::Letters => c.text(16, 310, "Shift  Uppercase", MUTED, 1),
+                    InputMode::Numbers | InputMode::Symbols => {
+                        let (keys, values) = match mode {
+                            InputMode::Numbers => (&b"QWERTYUIOP"[..], &b"1234567890"[..]),
+                            InputMode::Symbols => (SYMBOL_KEYS, SYMBOLS),
+                            InputMode::Letters => unreachable!(),
+                        };
+                        for (i, (key, value)) in keys.iter().zip(values).enumerate() {
+                            c.text(
+                                16 + (i % 10) * 76,
+                                310 + (i / 10) * 28,
+                                &format!("{}  {}", *key as char, *value as char),
+                                INK,
+                                1,
+                            );
+                        }
+                    }
+                }
                 confirm = Some(if *rename {
                     "Enter  Rename"
                 } else {

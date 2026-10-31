@@ -7,11 +7,13 @@ use brain_explorer::{
     Explorer,
     device::{Device, path},
 };
+use brain_tic80::home::{Choice, Home, game_id};
 use brain_tic80::{Input, debug, engine, paint};
 use core::{
     ffi::{CStr, c_void},
     ptr,
 };
+use reflex::storage::Store;
 use reflex::{
     Action, Application, Event, TouchPhase, Window, display, fs,
     peg::{self, raw},
@@ -31,6 +33,7 @@ struct Player {
     explorer: Explorer<Device>,
     browsing: bool,
     list_down: bool,
+    escape_down: bool,
     resume: bool,
     cartridge_path: CString,
     debug_menu: bool,
@@ -38,6 +41,13 @@ struct Player {
     debug_keys: u8,
     reset_down: bool,
     performance: debug::Performance,
+    home: Home,
+    home_visible: bool,
+    history: Option<Store>,
+    pmem: Option<Store>,
+    saved_pmem: Vec<u8>,
+    last_save_us: u64,
+    save_error: Option<&'static str>,
 }
 
 #[reflex::main]
@@ -52,6 +62,7 @@ fn main() -> Player {
         explorer: Explorer::picker(Device, b"tic"),
         browsing: false,
         list_down: false,
+        escape_down: false,
         resume: false,
         cartridge_path: c"SD0:\\APP\\TIC80\\cart.tic".into(),
         debug_menu: false,
@@ -59,6 +70,13 @@ fn main() -> Player {
         debug_keys: 0,
         reset_down: false,
         performance: debug::Performance::default(),
+        home: Home::new("TIC-80", br"SD0:\APP\TIC80\cart.tic", b"tic"),
+        home_visible: true,
+        history: None,
+        pmem: None,
+        saved_pmem: Vec::new(),
+        last_save_us: 0,
+        save_error: None,
     }
 }
 
@@ -85,9 +103,97 @@ fn cartridge(path: &CStr) -> Result<Vec<u8>, &'static str> {
 }
 
 impl Player {
+    fn load_history(&mut self) {
+        match Store::open(r"USR:\TIC80\history".into()) {
+            Ok((store, data)) => {
+                if store.recovered {
+                    self.home.notice = Some("Recovered previous history");
+                }
+                if let Some(data) = data
+                    && let Err(error) = self.home.decode(&data)
+                {
+                    self.home.notice = Some(error);
+                    return;
+                }
+                self.history = Some(store);
+            }
+            Err(error) => self.home.notice = Some(error),
+        }
+    }
+    fn save_pmem(&mut self) -> Result<(), &'static str> {
+        let Some(store) = &mut self.pmem else {
+            return Ok(());
+        };
+        let data = unsafe { core::slice::from_raw_parts(engine::brain_tic_pmem(), 256) };
+        let bytes: Vec<u8> = data.iter().flat_map(|word| word.to_le_bytes()).collect();
+        if bytes != self.saved_pmem {
+            store.save(&bytes)?;
+            self.saved_pmem = bytes;
+            self.save_error = None;
+        }
+        Ok(())
+    }
+    fn home_event(&mut self, event: Event) -> Action {
+        match self.home.event(event) {
+            Choice::None => Action::Redraw,
+            Choice::Exit => Action::Exit,
+            Choice::Browse => {
+                self.browsing = true;
+                self.list_down = matches!(
+                    event,
+                    Event::Key {
+                        code: peg::key::SELECT_FROM_LIST,
+                        down: true,
+                        ..
+                    }
+                );
+                self.explorer.reset_input();
+                Action::Redraw
+            }
+            Choice::Start(selected) => {
+                if self.started && !self.failed && selected == self.cartridge_path.to_bytes() {
+                    self.home_visible = false;
+                    self.resume = true;
+                    return Action::Redraw;
+                }
+                match path(&selected) {
+                    Ok(path) => self.cartridge_path = path,
+                    Err(error) => {
+                        self.home.notice = Some(error);
+                        return Action::Redraw;
+                    }
+                }
+                self.home_visible = false;
+                self.started = false;
+                self.failed = false;
+                Action::Redraw
+            }
+        }
+    }
     fn failure(&mut self, message: &str) -> Action {
         self.failed = true;
         self.error = String::from(message);
+        Action::Redraw
+    }
+    fn return_home(&mut self) -> Action {
+        if let Err(error) = self.save_pmem() {
+            self.save_error = Some(error);
+            return Action::Redraw;
+        }
+        self.home.set_active(if self.started && !self.failed {
+            Some(self.cartridge_path.to_bytes())
+        } else {
+            None
+        });
+        self.home_visible = true;
+        self.browsing = false;
+        self.debug_menu = false;
+        self.resume = false;
+        self.list_down = false;
+        self.debug_keys = 0;
+        self.reset_down = false;
+        self.input = Input::default();
+        self.send_input();
         Action::Redraw
     }
     fn engine_failure(&mut self) -> Action {
@@ -104,6 +210,10 @@ impl Player {
         self.failure("Game execution failed")
     }
     fn start(&mut self) -> Action {
+        if let Err(error) = self.save_pmem() {
+            return self.failure(error);
+        }
+        self.pmem = None;
         self.started = true;
         let data = match cartridge(&self.cartridge_path) {
             Ok(data) => data,
@@ -117,6 +227,38 @@ impl Player {
         };
         if result != 0 {
             return self.engine_failure();
+        }
+        let prefix = alloc::format!(
+            r"USR:\TIC80\pmem-{}",
+            game_id(self.cartridge_path.to_bytes())
+        );
+        match Store::open(prefix) {
+            Ok((store, data)) => {
+                if store.recovered {
+                    self.save_error = Some("Recovered previous save");
+                }
+                let bytes = match data {
+                    Some(bytes) => bytes,
+                    None => alloc::vec![0; 1024],
+                };
+                if bytes.len() != 1024 {
+                    return self.failure("Invalid pmem save size");
+                }
+                let words =
+                    unsafe { core::slice::from_raw_parts_mut(engine::brain_tic_pmem(), 256) };
+                for (word, bytes) in words.iter_mut().zip(bytes.as_chunks::<4>().0) {
+                    *word = u32::from_le_bytes(*bytes);
+                }
+                self.saved_pmem = bytes;
+                self.pmem = Some(store);
+            }
+            Err(error) => return self.failure(error),
+        }
+        self.home.record(self.cartridge_path.to_bytes());
+        if let Some(store) = &mut self.history
+            && let Err(error) = store.save(&self.home.encode())
+        {
+            self.save_error = Some(error);
         }
         self.reset_performance();
         self.next_frame_us = unsafe { reflex::runtime::micros() };
@@ -138,8 +280,13 @@ impl Player {
     fn toggle_browser(&mut self) -> Action {
         if self.browsing {
             self.browsing = false;
+            self.home.reset_input();
             self.resume = self.started && !self.failed;
         } else {
+            if let Err(error) = self.save_pmem() {
+                self.save_error = Some(error);
+                return Action::Redraw;
+            }
             self.browsing = true;
             self.debug_menu = false;
             self.resume = false;
@@ -161,6 +308,7 @@ impl Player {
                 }
             }
             self.browsing = false;
+            self.home_visible = false;
             self.started = false;
             self.failed = false;
             self.error.clear();
@@ -192,19 +340,49 @@ impl Player {
 impl Application for Player {
     fn mounted(&mut self, window: Window) -> Action {
         self.window = window.raw;
+        self.load_history();
         unsafe {
             raw::set_timer(self.window, TIMER, 1, 1);
         }
         Action::Redraw
     }
     fn raw_event(&mut self, message: &peg::Message) -> Option<Action> {
+        if message.param == peg::key::ESCAPE
+            && matches!(
+                message.kind,
+                peg::PM_KEY | peg::PM_KEY_DOWN | peg::PM_KEY_UP
+            )
+        {
+            return Some(self.event(Event::Key {
+                code: message.param,
+                down: message.kind != peg::PM_KEY_UP,
+                flags: 0,
+            }));
+        }
+        if self.home_visible
+            && !self.browsing
+            && !(message.kind == peg::PM_KEY && message.param == peg::TOUCH_MOVE_PARAM)
+            && matches!(
+                message.kind,
+                peg::PM_KEY | peg::PM_KEY_DOWN | peg::PM_KEY_UP
+            )
+        {
+            return Some(self.home_event(Event::Key {
+                code: message.param,
+                down: message.kind != peg::PM_KEY_UP,
+                flags: 0,
+            }));
+        }
         if matches!(
             message.kind,
             peg::PM_KEY | peg::PM_KEY_DOWN | peg::PM_KEY_UP
         ) && (self.debug_menu
             || matches!(
                 message.param,
-                peg::key::SELECT_FROM_LIST | peg::key::HISTORY | peg::key::MY_DICTIONARY
+                peg::key::HOME
+                    | peg::key::SELECT_FROM_LIST
+                    | peg::key::HISTORY
+                    | peg::key::MY_DICTIONARY
             ))
         {
             // Consume repeats/releases too, rather than forwarding the List key to the host.
@@ -215,7 +393,7 @@ impl Application for Player {
             }));
         }
         if message.kind == peg::PM_TIMER && message.param == TIMER as u16 {
-            return Some(if self.browsing || self.failed {
+            return Some(if self.home_visible || self.browsing || self.failed {
                 Action::None
             } else if !self.started {
                 self.start()
@@ -228,18 +406,33 @@ impl Application for Player {
                 if now < self.next_frame_us {
                     Action::None
                 } else {
-                    // Preserve the 60 Hz phase across timer jitter; cap catch-up to keep input responsive.
+                    // Catch up only while the batch fits in one display frame.
                     for _ in 0..4 {
+                        let step_started = unsafe { reflex::runtime::micros() };
                         if unsafe { stack::run(|| engine::brain_tic_step()) } != 0 {
                             return Some(self.engine_failure());
                         }
+                        let finished = unsafe { reflex::runtime::micros() };
+                        self.performance.frame_us = finished.wrapping_sub(step_started);
+                        self.performance.max_frame_us =
+                            self.performance.max_frame_us.max(self.performance.frame_us);
                         self.next_frame_us += 1_000_000 / 60;
+                        if finished.wrapping_sub(now) >= 1_000_000 / 60 {
+                            self.next_frame_us = finished;
+                            break;
+                        }
                         if self.next_frame_us > now {
                             break;
                         }
                     }
                     if self.next_frame_us <= now {
                         self.next_frame_us = now + 1_000_000 / 60;
+                    }
+                    if now.wrapping_sub(self.last_save_us) >= 1_000_000 {
+                        self.last_save_us = now;
+                        if let Err(error) = self.save_pmem() {
+                            self.save_error = Some(error);
+                        }
                     }
                     Action::Redraw
                 }
@@ -248,6 +441,21 @@ impl Application for Player {
         None
     }
     fn event(&mut self, event: Event) -> Action {
+        if let Event::Key {
+            code: peg::key::ESCAPE,
+            down,
+            ..
+        } = event
+        {
+            let pressed = down && !self.escape_down;
+            self.escape_down = down;
+            if !pressed && down {
+                return Action::None;
+            }
+        }
+        if self.home_visible && !self.browsing {
+            return self.home_event(event);
+        }
         if let Event::Key { code, down, .. } = event
             && matches!(code, peg::key::HISTORY | peg::key::MY_DICTIONARY)
         {
@@ -285,15 +493,17 @@ impl Application for Player {
                 Action::None
             };
         }
-        if matches!(
-            event,
-            Event::Key {
-                code: peg::key::HOME,
-                down: true,
-                ..
-            }
-        ) {
-            return Action::Exit;
+        if let Event::Key {
+            code: peg::key::HOME,
+            down,
+            ..
+        } = event
+        {
+            return if down {
+                self.return_home()
+            } else {
+                Action::None
+            };
         }
         if self.browsing {
             return self.browse(event);
@@ -326,7 +536,7 @@ impl Application for Player {
                 code: peg::key::ESCAPE,
                 down: true,
                 ..
-            } => return Action::Exit,
+            } => return self.return_home(),
             Event::Key { code, down, .. } => self.input.key(code, down),
             Event::Touch { x, y, phase } => self.input.pointer(x, y, phase != TouchPhase::Up),
         }
@@ -338,12 +548,16 @@ impl Application for Player {
             self.explorer.draw(pixels);
             return;
         }
+        if self.home_visible {
+            self.home.draw(pixels);
+            return;
+        }
         if self.failed || !self.started {
             pixels.fill(0);
         }
         if self.failed {
             let message =
-                alloc::format!("TIC-80\n\n{}\n\nList  Select game\nEsc  Exit", self.error);
+                alloc::format!("TIC-80\n\n{}\n\nList  Select game\nEsc  Home", self.error);
             for (line, chunk) in message
                 .lines()
                 .flat_map(|s| s.as_bytes().chunks(62))
@@ -374,6 +588,17 @@ impl Application for Player {
                 );
             }
         }
+        if let Some(error) = self.save_error {
+            reflex::text::draw(
+                |x, y, c| pixels[y * display::WIDTH + x] = c,
+                16,
+                448,
+                error,
+                0xffff,
+                0xa900,
+                1,
+            );
+        }
         if self.show_fps && !self.failed {
             debug::hud(pixels, &self.performance);
         }
@@ -387,7 +612,7 @@ impl Application for Player {
         }
     }
     fn before_draw(&mut self, _: peg::Rect) {
-        if self.started && !self.failed && !self.browsing && !self.resume {
+        if self.started && !self.failed && !self.home_visible && !self.browsing && !self.resume {
             let frame = unsafe { engine::brain_tic_frames() };
             self.performance.rendered(frame);
             // Count actual presentations, including redraws requested outside the timer.
@@ -396,6 +621,10 @@ impl Application for Player {
         }
     }
     fn can_exit(&mut self) -> bool {
+        if let Err(error) = self.save_pmem() {
+            self.save_error = Some(error);
+            return false;
+        }
         unsafe {
             raw::kill_timer(self.window, TIMER);
             stack::run(|| engine::brain_tic_close());

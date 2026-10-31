@@ -10,6 +10,8 @@ pub struct Performance {
     draws: u32,
     pub fps: u32,
     pub emulation_fps: u32,
+    pub frame_us: u64,
+    pub max_frame_us: u64,
 }
 impl Performance {
     pub fn reset(&mut self, now: u64, frame: u64) {
@@ -85,8 +87,8 @@ pub fn menu(pixels: &mut [u16], performance: &Performance, audio: &Audio, show_f
         "TIC-80 DEBUG".into(),
         format!("Display FPS       {}", performance.fps),
         format!("Emulation FPS     {}", performance.emulation_fps),
-        format!("Audio fill        {} us", audio.fill_us),
-        format!("Audio fill max    {} us", audio.max_fill_us),
+        format!("Frame CPU         {} us", performance.frame_us),
+        format!("Frame CPU max     {} us", performance.max_frame_us),
         format!("Audio submits     {}", audio.submits),
         format!("Audio restarts    {}", audio.restarts),
         format!("Audio state       {state}"),

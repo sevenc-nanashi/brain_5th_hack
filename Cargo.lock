@@ -165,6 +165,9 @@ version = "0.1.0"
 dependencies = [
  "brain-explorer",
  "reflex",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -469,6 +472,9 @@ version = "0.1.0"
 dependencies = [
  "qrcodegen-no-heap",
  "reflex-macros",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]

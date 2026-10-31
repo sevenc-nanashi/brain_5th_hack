@@ -1,4 +1,5 @@
 #![no_std]
+extern crate alloc;
 
 pub mod help;
 
@@ -16,7 +17,7 @@ pub fn doom_key(code: u16) -> Option<i32> {
         key::BACKSPACE => 27,
         key::SHIFT => 0xb6,
         key::INPUT_MODE => 9,
-        key::AUDIO => 0xff, // Pause
+        key::AUDIO => return None, // Handled by the host audio toggle.
         0x41..=0x5a => i32::from(code + 32),
         9 | 13 | 27 | 32..=126 => i32::from(code),
         _ => return None,
@@ -49,3 +50,6 @@ pub mod engine;
 
 #[cfg(feature = "engine")]
 mod music;
+
+#[cfg(feature = "engine")]
+pub mod files;
