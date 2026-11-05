@@ -305,7 +305,7 @@ fn operations<F: Filesystem>(app: &Explorer<F>, c: &mut Canvas<'_>) {
         c.text(
             16,
             238,
-            &format!("{} / {} bytes", copy.offset, copy.size),
+            &format!("File: {} / {} bytes", copy.offset, copy.size),
             INK,
             2,
         );
@@ -350,11 +350,7 @@ fn operations<F: Filesystem>(app: &Explorer<F>, c: &mut Canvas<'_>) {
                         c.text(
                             600,
                             118 + index * 44,
-                            if index == 0
-                                && app.entries.get(app.selected).is_some_and(|e| e.directory)
-                            {
-                                "Files only"
-                            } else if index != 0 && !app.writable_folder() {
+                            if index != 0 && !app.writable_folder() {
                                 "Read-only"
                             } else if index == 2 {
                                 "Clipboard empty"

@@ -30,7 +30,30 @@ pub(super) struct CopyJob {
     pub file: Vec<u8>,
     pub size: u32,
     pub offset: u32,
+    active: bool,
+    pending: Vec<CopyItem>,
 }
+struct CopyItem {
+    source: Vec<u8>,
+    target: Vec<u8>,
+    entry: Entry,
+}
+
+fn child(parent: &[u8], name: &[u8]) -> Result<Vec<u8>, &'static str> {
+    if name.is_empty()
+        || name == b"."
+        || name == b".."
+        || name.iter().any(|byte| matches!(byte, 0 | b'/' | b'\\'))
+    {
+        return Err("Invalid filename in folder");
+    }
+    let path = [parent, b"\\", name].concat();
+    if path.len() >= 260 {
+        return Err("Path exceeds 259 bytes");
+    }
+    Ok(path)
+}
+
 impl<F: Filesystem> Explorer<F> {
     pub(super) fn operations_enabled(&self) -> bool {
         self.extension.is_none() && self.viewer.is_none() && !self.folders.is_empty()
@@ -41,7 +64,7 @@ impl<F: Filesystem> Explorer<F> {
     pub(super) fn menu_enabled(&self, index: usize) -> bool {
         let entry = self.entries.get(self.selected);
         match index {
-            0 => entry.is_some_and(|e| !e.directory),
+            0 => entry.is_some(),
             1 | 3 | 4 => self.writable_folder() && entry.is_some(),
             2 => self.writable_folder() && self.clipboard.is_some(),
             5 => self.writable_folder(),
@@ -97,9 +120,12 @@ impl<F: Filesystem> Explorer<F> {
             return Err("Source and destination are the same");
         }
         if clip.entry.directory
-            && destination.starts_with(&[clip.source.as_slice(), b"\\"].concat())
+            && destination
+                .get(..clip.source.len())
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case(&clip.source))
+            && destination.get(clip.source.len()) == Some(&b'\\')
         {
-            return Err("Cannot move a folder inside itself");
+            return Err("Cannot paste a folder inside itself");
         }
         let current = self.fs.metadata(&clip.source)?;
         if current.directory != clip.entry.directory
@@ -121,7 +147,7 @@ impl<F: Filesystem> Explorer<F> {
             self.dialog = None;
             self.refresh_after(Some(&name))?;
         } else {
-            if current.size > i32::MAX as u32 {
+            if !current.directory && current.size > i32::MAX as u32 {
                 return Err("Copy supports files up to 2 GiB - 1 byte");
             }
             let stage = self.path(Some(b".explorer-copy"));
@@ -130,19 +156,19 @@ impl<F: Filesystem> Explorer<F> {
                 return Err("Path exceeds 259 bytes");
             }
             self.fs.create_dir(&stage)?;
-            if let Err(error) = self.fs.create_file(&file) {
-                // A failed close can leave an empty file; retain the staging folder for recovery.
-                self.dialog = None;
-                self.refresh_after(None)?;
-                return Err(error);
-            }
             self.copying = Some(CopyJob {
                 source: clip.source.clone(),
                 destination,
                 stage,
-                file,
-                size: current.size,
+                file: file.clone(),
+                size: 0,
                 offset: 0,
+                active: false,
+                pending: alloc::vec![CopyItem {
+                    source: clip.source,
+                    target: file,
+                    entry: current
+                }],
             });
             self.dialog = None;
         }
@@ -183,7 +209,7 @@ impl<F: Filesystem> Explorer<F> {
         self.copying.is_some()
     }
 
-    /// One bounded copy chunk per host tick. No filesystem handles survive a tick.
+    /// One entry or bounded file chunk per tick. No filesystem handles survive a tick.
     pub fn poll(&mut self) -> Action {
         if self.copying.is_none() {
             return Action::None;
@@ -202,6 +228,50 @@ impl<F: Filesystem> Explorer<F> {
     }
     fn copy_chunk(&mut self) -> Result<(), &'static str> {
         let job = self.copying.as_mut().unwrap();
+        if !job.active {
+            if let Some(item) = job.pending.pop() {
+                if job.destination.len() + item.target.len() - job.stage.len() - b"\\data".len()
+                    >= 260
+                {
+                    return Err("Path exceeds 259 bytes");
+                }
+                let current = self.fs.metadata(&item.source)?;
+                if current.directory != item.entry.directory
+                    || (!current.directory && current.size != item.entry.size)
+                {
+                    return Err("Source changed during copy");
+                }
+                job.source = item.source;
+                job.file = item.target;
+                job.size = if current.directory { 0 } else { current.size };
+                job.offset = 0;
+                if current.directory {
+                    self.fs.create_dir(&job.file)?;
+                    for entry in self.fs.read_dir(&job.source)?.into_iter().rev() {
+                        job.pending.push(CopyItem {
+                            source: child(&job.source, &entry.name)?,
+                            target: child(&job.file, &entry.name)?,
+                            entry,
+                        });
+                    }
+                } else {
+                    if job.size > i32::MAX as u32 {
+                        return Err("Copy supports files up to 2 GiB - 1 byte");
+                    }
+                    self.fs.create_file(&job.file)?;
+                    job.active = true;
+                }
+            } else {
+                self.fs
+                    .rename(&child(&job.stage, b"data")?, &job.destination)?;
+                let job = self.copying.take().unwrap();
+                let cleanup = self.fs.remove(&job.stage, true);
+                let refresh = self.refresh_after(None);
+                cleanup.map_err(|_| "Copied; remove the empty .explorer-copy folder")?;
+                refresh?;
+            }
+            return Ok(());
+        }
         if job.offset < job.size {
             let mut data = alloc::vec![0u8; 16 * 1024];
             let count = data.len().min((job.size - job.offset) as usize);
@@ -217,28 +287,38 @@ impl<F: Filesystem> Explorer<F> {
             }
             job.offset += count as u32;
         } else {
-            if self.fs.metadata(&job.source)?.size != job.size
+            let current = self.fs.metadata(&job.source)?;
+            if current.directory
+                || current.size != job.size
                 || self.fs.read(&job.source, job.size, &mut [0])? != 0
             {
                 return Err("Source changed during copy");
             }
-            self.fs.rename(&job.file, &job.destination)?;
-            let job = self.copying.take().unwrap();
-            let cleanup = self.fs.remove(&job.stage, true);
-            let refresh = self.refresh_after(None);
-            cleanup.map_err(|_| "Copied; remove the empty .explorer-copy folder")?;
-            refresh?;
+            job.active = false;
         }
         Ok(())
     }
     pub fn cancel_copy(&mut self) -> Result<(), &'static str> {
         if let Some(job) = self.copying.take() {
-            self.fs
-                .remove(&job.file, false)
+            self.remove_staging(job.stage)
                 .map_err(|_| "Copy stopped; remove .explorer-copy manually")?;
-            self.fs
-                .remove(&job.stage, true)
-                .map_err(|_| "Copy stopped; remove .explorer-copy manually")?;
+        }
+        Ok(())
+    }
+    fn remove_staging(&mut self, stage: Vec<u8>) -> Result<(), &'static str> {
+        // Only traverse the staging directory created exclusively by this job.
+        let mut pending = alloc::vec![(stage, false)];
+        while let Some((path, visited)) = pending.pop() {
+            let directory = self.fs.metadata(&path)?.directory;
+            if directory && !visited {
+                let entries = self.fs.read_dir(&path)?;
+                pending.push((path.clone(), true));
+                for entry in entries {
+                    pending.push((child(&path, &entry.name)?, false));
+                }
+            } else {
+                self.fs.remove(&path, directory)?;
+            }
         }
         Ok(())
     }
