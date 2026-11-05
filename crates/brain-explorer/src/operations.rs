@@ -35,6 +35,8 @@ pub(super) struct CopyJob {
     pub copied_bytes: u64,
     pub total_items: u64,
     pub copied_items: u64,
+    pub eta_seconds: Option<u64>,
+    started_at: Option<u64>,
     active: bool,
     scan: Vec<CopyItem>,
     pending: VecDeque<CopyItem>,
@@ -188,6 +190,8 @@ impl<F: Filesystem> Explorer<F> {
                 copied_bytes: 0,
                 total_items: 0,
                 copied_items: 0,
+                eta_seconds: None,
+                started_at: None,
                 active: false,
                 pending: VecDeque::new(),
                 scan: alloc::vec![CopyItem {
@@ -236,9 +240,24 @@ impl<F: Filesystem> Explorer<F> {
     }
 
     /// One entry or bounded file chunk per tick. No filesystem handles survive a tick.
-    pub fn poll(&mut self) -> Action {
-        if self.copying.is_none() {
+    pub fn poll(&mut self, now_micros: u64) -> Action {
+        let Some(job) = self.copying.as_mut() else {
             return Action::None;
+        };
+        if !job.scanning() {
+            let started_at = *job.started_at.get_or_insert(now_micros);
+            let elapsed = now_micros.wrapping_sub(started_at);
+            let (done, total) = if job.total_bytes == 0 {
+                (job.copied_items, job.total_items)
+            } else {
+                (job.copied_bytes, job.total_bytes)
+            };
+            if done > 0 && elapsed > 0 {
+                job.eta_seconds = Some(
+                    (u128::from(elapsed) * u128::from(total - done))
+                        .div_ceil(u128::from(done) * 1_000_000) as u64,
+                );
+            }
         }
         match self.copy_chunk() {
             Ok(()) => Action::Redraw,

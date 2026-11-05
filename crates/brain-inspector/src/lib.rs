@@ -1,4 +1,5 @@
 #![no_std]
+pub mod bar_image;
 pub mod fpu;
 pub mod input;
 use core::fmt::{self, Write};
@@ -7,6 +8,7 @@ use reflex::display::{HEIGHT, WIDTH};
 
 #[derive(Clone, Copy, Default)]
 pub struct Measurements {
+    pub bar: BarMeasurements,
     pub fpu: fpu::Measurements,
     pub audio: AudioMeasurements,
     pub screen: [i16; 4],
@@ -24,6 +26,107 @@ pub struct Measurements {
     pub pressed_flags: i32,
     pub touch_down: bool,
     pub touch: Option<(u16, u16)>,
+}
+
+#[derive(Clone, Copy)]
+pub enum BarImage {
+    Resource(u32, u32),
+    RustLogo,
+}
+
+use BarImage::{Resource, RustLogo};
+pub const BAR_BUTTONS: [(&str, BarImage); reflex::operation_bar::image::ALL.len() + 1] = {
+    let images = reflex::operation_bar::image::ALL;
+    let mut buttons = [("RUST LOGO", RustLogo); reflex::operation_bar::image::ALL.len() + 1];
+    let mut i = 0;
+    while i < images.len() {
+        let (name, normal, pressed) = images[i];
+        let slot = if i < 9 { i } else { i + 1 };
+        buttons[slot] = (name, Resource(normal, pressed));
+        i += 1;
+    }
+    buttons
+};
+// SharpLib 0x110134 writes 16-byte rectangles into the 960-byte area at bar + 0x70.
+pub const BAR_MAX_SLOTS: usize = 60;
+
+#[derive(Clone, Copy)]
+pub struct BarMeasurements {
+    pub selected: usize,
+    pub slots: usize,
+    pub buttons: [usize; BAR_MAX_SLOTS],
+    pub handle: u32,
+    pub items: [u32; BAR_MAX_SLOTS],
+    pub call: &'static str,
+    pub result: i32,
+    pub flags: u32,
+    pub events: u32,
+    pub param: u16,
+    pub data: [i32; 2],
+}
+
+impl Default for BarMeasurements {
+    fn default() -> Self {
+        Self {
+            selected: 0,
+            slots: 3,
+            buttons: core::array::from_fn(|i| i % BAR_BUTTONS.len()),
+            handle: 0,
+            items: [0; BAR_MAX_SLOTS],
+            call: "IDLE",
+            result: 0,
+            flags: 0,
+            events: 0,
+            param: 0,
+            data: [0; 2],
+        }
+    }
+}
+
+impl BarMeasurements {
+    pub fn shuffle(&mut self, all: bool, mut seed: u32) {
+        let slots = if all {
+            0..self.slots
+        } else {
+            self.selected..self.selected + 1
+        };
+        for slot in slots {
+            seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+            let step = 1 + (seed >> 16) as usize % (BAR_BUTTONS.len() - 1);
+            self.buttons[slot] = (self.buttons[slot] + step) % BAR_BUTTONS.len();
+        }
+    }
+
+    /// Returns true when a button image changes and the live bar needs rebuilding.
+    pub fn edit_button(&mut self, key: u16) -> bool {
+        use reflex::peg::key;
+        match key {
+            key::DOWN => self.selected = (self.selected + self.slots - 1) % self.slots,
+            key::UP => self.selected = (self.selected + 1) % self.slots,
+            key::PAGE_UP | key::PAGE_DOWN => {
+                let previous = self.slots;
+                self.slots = if key == key::PAGE_UP {
+                    (self.slots + 1).min(BAR_MAX_SLOTS)
+                } else {
+                    self.slots.saturating_sub(1).max(1)
+                };
+                self.selected = self.selected.min(self.slots - 1);
+                return self.slots != previous;
+            }
+            key::LEFT | key::RIGHT => {
+                let step = if key == key::RIGHT {
+                    1
+                } else {
+                    BAR_BUTTONS.len() - 1
+                };
+                self.buttons[self.selected] =
+                    (self.buttons[self.selected] + step) % BAR_BUTTONS.len();
+                return true;
+            }
+            _ => unreachable!(),
+        }
+        false
+    }
 }
 
 #[derive(Clone, Copy, Default)]
@@ -176,6 +279,93 @@ pub fn render(pixels: &mut [u16], m: &Measurements, edge: usize, input: &Input) 
         color: 0xffff,
         scale: 2,
     };
+    if input.mode == Mode::Bar {
+        c.pixels.fill(0);
+        c.at(28, 24, 0xffff);
+        write!(c, "OPERATION BAR").unwrap();
+        c.scale = 1;
+        let b = &m.bar;
+        for (y, text) in [
+            (
+                70,
+                "C CREATE   D DESTROY   S SHOW (0A)   T RANDOM   SHIFT+T ALL",
+            ),
+            (
+                96,
+                "Q  CONTROL 01    W  CONTROL 02    E  CONTROL 04    R  CONTROL 08",
+            ),
+            (122, "UP/DOWN  SELECT SLOT    LEFT/RIGHT  CHANGE BUTTON"),
+        ] {
+            c.at(28, y, 0xffe0);
+            write!(c, "{text}").unwrap();
+        }
+        let start = b.selected / 9 * 9;
+        let end = (start + 9).min(b.slots);
+        c.at(28, 142, 0xffe0);
+        write!(
+            c,
+            "PAGE UP/DOWN  SLOT COUNT (1-{BAR_MAX_SLOTS})    VIEW {}-{} / {}",
+            start + 1,
+            end,
+            b.slots
+        )
+        .unwrap();
+        for (row, i) in (start..end).rev().enumerate() {
+            c.at(
+                28,
+                166 + row * 16,
+                if i == b.selected { 0xffe0 } else { 0xffff },
+            );
+            let (name, image) = BAR_BUTTONS[b.buttons[i]];
+            write!(
+                c,
+                "{} SLOT {}  {:32}  ",
+                if i == b.selected { "*" } else { " " },
+                i + 1,
+                name
+            )
+            .unwrap();
+            match image {
+                Resource(normal, pressed) => write!(c, "{normal:04X}/{pressed:04X}"),
+                RustLogo => write!(c, "RGB565 52X52"),
+            }
+            .unwrap();
+        }
+        c.at(28, 318, 0xffff);
+        write!(
+            c,
+            "HANDLE {:08X}   SLOTS {}   SLOT {} ITEM {:08X}",
+            b.handle,
+            b.slots,
+            b.selected + 1,
+            b.items[b.selected]
+        )
+        .unwrap();
+        c.at(28, 340, 0xffff);
+        write!(
+            c,
+            "CALL {}   RESULT {}   LAST FLAGS {:02X}",
+            b.call, b.result, b.flags
+        )
+        .unwrap();
+        c.at(28, 362, 0x07e0);
+        write!(
+            c,
+            "EVENTS {}   TYPE 010B   PARAM {:04X}   DATA {:?}",
+            b.events, b.param, b.data
+        )
+        .unwrap();
+        c.rect("WIN REAL", m.window_real, 386, 0xffff);
+        c.rect("WIN CLIP", m.window_clip, 406, 0xffff);
+        c.at(28, 446, 0xffe0);
+        write!(
+            c,
+            "{}   LIST  SETTINGS   ESC  EXIT",
+            if input.locked { "LOCKED" } else { "UNLOCKED" }
+        )
+        .unwrap();
+        return;
+    }
     if input.mode == Mode::Fpu {
         c.pixels.fill(0);
         c.at(28, 24, 0xffff);
@@ -478,7 +668,7 @@ pub fn render(pixels: &mut [u16], m: &Measurements, edge: usize, input: &Input) 
     c.at(28, 270, 0xffff);
     write!(c, "LEFT:OFF RIGHT:ON").unwrap();
     c.at(28, 294, 0xffe0);
-    write!(c, "F: FPU TEST").unwrap();
+    write!(c, "F  FPU TEST     B  OPERATION BAR").unwrap();
     c.at(28, 318, 0xffe0);
     write!(c, "SHIFT P: PANIC TEST").unwrap();
     if input.panic_confirm {
@@ -511,6 +701,7 @@ fn status(c: &mut Canvas<'_>, input: &Input) {
         Mode::Settings => "SETTINGS",
         Mode::Audio => "AUDIO",
         Mode::Fpu => "FPU",
+        Mode::Bar => "BAR",
     };
     c.at(28, top + 2, 0xffe0);
     write!(

@@ -351,6 +351,16 @@ fn operations<F: Filesystem>(app: &Explorer<F>, c: &mut Canvas<'_>) {
             c.rect(16, 342, 768, 16, LINE);
             c.rect(16, 342, copy.progress(768) as usize, 16, ACCENT);
         }
+        let eta = match copy.eta_seconds {
+            Some(seconds) => format!(
+                "ETA {:02}:{:02}:{:02}",
+                seconds / 3600,
+                seconds / 60 % 60,
+                seconds % 60
+            ),
+            None => String::from("ETA --:--:--"),
+        };
+        c.text(16, 380, &eta, INK, 1);
     } else {
         match app.dialog.as_ref().unwrap() {
             Dialog::Menu(selected) => {

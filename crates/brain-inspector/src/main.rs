@@ -12,6 +12,7 @@ use reflex::{
     runtime,
 };
 mod audio;
+mod bar;
 const TIMER: u32 = 0x5052;
 const USABLE_WIDTH: usize = 800;
 #[derive(Default)]
@@ -21,6 +22,7 @@ struct Inspector {
     window: *mut c_void,
     presentation: *mut c_void,
     audio_keys: u8,
+    bar: bar::Bar,
 }
 #[reflex::main]
 fn main() -> Inspector {
@@ -45,6 +47,19 @@ impl Inspector {
     unsafe fn message(&mut self, msg: &peg::Message) -> Option<Action> {
         unsafe {
             let window = self.window;
+            if msg.kind == bar::MESSAGE && self.input.mode == Mode::Bar {
+                let m = &mut self.measurements.bar;
+                m.events = m.events.wrapping_add(1);
+                m.param = msg.param;
+                m.data = msg.data.ext_params;
+                return Some(Action::Redraw);
+            }
+            if self.input.mode == Mode::Bar && matches!(msg.kind, 7 | 8) {
+                self.bar.control(
+                    if msg.kind == 7 { 4 } else { 8 },
+                    &mut self.measurements.bar,
+                );
+            }
             if msg.kind >= 0x100 && self.input.mode == Mode::Audio {
                 let mut m = self.measurements;
                 audio::event(msg, &mut m.audio);
@@ -104,6 +119,17 @@ impl Inspector {
                         peg::key::RIGHT => 64,
                         _ => 0,
                     };
+                    if previous_mode == Mode::Bar && input.mode != Mode::Bar {
+                        self.bar.close(&mut m.bar);
+                    }
+                    let bar_control = self.bar.key(
+                        msg.param,
+                        m.flags as u32,
+                        msg.kind == peg::PM_KEY_UP,
+                        input.mode == Mode::Bar && !input.locked,
+                        window,
+                        &mut m.bar,
+                    );
                     let audio_control = input.mode == Mode::Audio && audio_bit != 0;
                     if audio_control {
                         if msg.kind == peg::PM_KEY_UP {
@@ -140,6 +166,7 @@ impl Inspector {
                         return Some(Action::Exit);
                     }
                     if consumed
+                        || bar_control
                         || audio_control
                         || matches!(
                             msg.param,
@@ -208,6 +235,7 @@ impl Application for Inspector {
                 return false;
             }
             raw::kill_timer(self.window, TIMER);
+            self.bar.close(&mut self.measurements.bar);
         }
         true
     }

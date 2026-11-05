@@ -16,4 +16,4 @@ required-features = ["device"]
 [package.metadata.reflex]
 name = "Inspector"
 output = "inspector"
-assets = ["../reflex/assets/FONT-LICENSE.txt"]
+assets = ["../reflex/assets/FONT-LICENSE.txt", "assets/RUST-LOGO-LICENSE.txt"]

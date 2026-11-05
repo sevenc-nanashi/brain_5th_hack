@@ -9,6 +9,7 @@ pub mod storage;
 
 pub mod app;
 pub mod display;
+pub mod operation_bar;
 pub mod peg;
 
 #[cfg(all(

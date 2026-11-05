@@ -363,7 +363,7 @@ impl Application for Sender {
             return None;
         }
         if self.state == State::Browsing {
-            let action = self.explorer.poll();
+            let action = self.explorer.poll(unsafe { runtime::micros() });
             if !self.explorer.copying() {
                 self.power_inhibit = None;
             }

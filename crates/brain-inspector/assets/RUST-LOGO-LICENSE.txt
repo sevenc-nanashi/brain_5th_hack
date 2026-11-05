@@ -1,0 +1,9 @@
+Rust logo — The Rust Project
+Source: https://github.com/rust-lang/rust-artwork/tree/main/logo
+License: Creative Commons Attribution 4.0 International
+https://creativecommons.org/licenses/by/4.0/
+
+The SVG was obtained from the Rust 1.99.1 documentation distribution.
+For this display test it is scaled to 44x44 on a white 52x52 background,
+converted to grayscale and RGB565, and darkened for the pressed state.
+This application is not endorsed by the Rust Project or Rust Foundation.
