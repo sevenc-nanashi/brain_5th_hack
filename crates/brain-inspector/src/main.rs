@@ -169,6 +169,12 @@ impl Inspector {
                 peg::PM_TIMER if msg.param == TIMER as u16 => {
                     let mut m = self.measurements;
                     audio::maintain(window, &mut m.audio);
+                    if core::mem::take(&mut self.input.fpu_requested)
+                        && self.input.mode == Mode::Fpu
+                        && !self.input.locked
+                    {
+                        m.fpu = brain_inspector::fpu::run();
+                    }
                     self.measurements = m;
                     self.sample();
                     return Some(Action::Redraw);

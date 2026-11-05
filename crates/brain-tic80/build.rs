@@ -2,9 +2,11 @@ use std::{env, path::PathBuf, process::Command};
 
 fn main() {
     println!("cargo:rerun-if-env-changed=TIC80_INPUTS");
+    println!("cargo:rerun-if-env-changed=LUAJIT_HOST_CC");
     println!("cargo:rerun-if-changed=engine");
     println!("cargo:rerun-if-changed=assets/demo.lua");
     println!("cargo:rerun-if-changed=../../scripts/build-tic80.rb");
+    println!("cargo:rerun-if-changed=../../scripts/build-tic80-luajit.rb");
     if env::var_os("CARGO_FEATURE_ENGINE").is_none() {
         return;
     }
@@ -26,9 +28,10 @@ fn main() {
     );
     println!("cargo:rustc-link-search=native={}", out.display());
     println!("cargo:rustc-link-lib=static=brain-tic80");
+    println!("cargo:rustc-link-lib=static=brain-luajit");
     if arm {
         println!(
-            "cargo:rustc-link-search=native={}/newlib/usr/lib/arm-none-eabi/newlib/thumb/v7-a/nofp",
+            "cargo:rustc-link-search=native={}/newlib/usr/lib/arm-none-eabi/newlib/thumb/v7-a+fp/softfp",
             inputs.display()
         );
         for lib in ["c", "m", "nosys"] {

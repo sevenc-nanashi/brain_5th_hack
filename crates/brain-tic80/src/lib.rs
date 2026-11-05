@@ -8,6 +8,47 @@ pub const HEIGHT: usize = 144;
 pub const LEFT: usize = (800 - WIDTH * 3) / 2;
 pub const TOP: usize = (480 - HEIGHT * 3) / 2;
 
+#[derive(Clone, Copy, Default)]
+pub enum InputMode {
+    #[default]
+    Letters,
+    Numbers,
+    Symbols,
+}
+impl InputMode {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Letters => Self::Numbers,
+            Self::Numbers => Self::Symbols,
+            Self::Symbols => Self::Letters,
+        }
+    }
+    pub fn hint(self) -> &'static str {
+        match self {
+            Self::Letters => "A1 ABC  Letters",
+            Self::Numbers => "A1 123  QWERTYUIOP=1234567890",
+            Self::Symbols => "A1 SYM  QWERTYUIOPA=-=[]\\;'`,./",
+        }
+    }
+    fn map(self, key: u8) -> Option<u8> {
+        if !(1..=26).contains(&key) {
+            return Some(key);
+        }
+        let letter = b'a' + key - 1;
+        match self {
+            Self::Letters => Some(key),
+            Self::Numbers => b"qwertyuiop"
+                .iter()
+                .position(|&k| k == letter)
+                .map(|i| if i == 9 { 27 } else { 28 + i as u8 }),
+            Self::Symbols => b"qwertyuiopa"
+                .iter()
+                .position(|&k| k == letter)
+                .map(|i| 37 + i as u8),
+        }
+    }
+}
+
 pub struct Input {
     held: [bool; 79],
     pub x: u8,
@@ -62,13 +103,16 @@ impl Input {
             .enumerate()
             .fold(0, |bits, (i, &key)| bits | ((self.held[key] as u8) << i))
     }
-    pub fn keyboard(&self) -> u32 {
+    pub fn keyboard(&self, mode: InputMode) -> u32 {
         let mut keys = [0; 4];
-        for (slot, (key, _)) in keys
-            .iter_mut()
-            .zip(self.held.iter().enumerate().filter(|(_, down)| **down))
-        {
-            *slot = key as u8;
+        for (slot, key) in keys.iter_mut().zip(
+            self.held
+                .iter()
+                .enumerate()
+                .filter(|(_, down)| **down)
+                .filter_map(|(key, _)| mode.map(key as u8)),
+        ) {
+            *slot = key;
         }
         u32::from_le_bytes(keys)
     }
@@ -106,6 +150,7 @@ pub mod engine {
     //! Single-instance C player. Serialize calls and close before loading another cartridge.
     use core::ffi::c_char;
     unsafe extern "C" {
+        pub fn brain_tic_backend(jit: bool) -> i32;
         pub fn brain_tic_init(cart: *const u8, length: usize) -> i32;
         pub fn brain_tic_fill(output: *mut i16, count: usize) -> i32;
         pub fn brain_tic_step() -> i32;

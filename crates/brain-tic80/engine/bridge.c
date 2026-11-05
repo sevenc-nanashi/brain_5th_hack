@@ -1,7 +1,5 @@
 #include "core/core.h"
 #include "cart.h"
-#include <lua.h>
-#include <lauxlib.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -11,6 +9,8 @@ static tic_tick_data tick_data;
 static char error_text[512];
 static int result;
 static unsigned budget;
+volatile int brain_tic_trace_budget;
+extern tic_script_config brain_lua_LuaSyntaxConfig, LuaSyntaxConfig;
 static unsigned sample_offset;
 static uint64_t frames;
 
@@ -26,10 +26,16 @@ static void exit_cart(void *unused) { result = 1; }
 static uint64_t counter(void *unused) { return frames; }
 static uint64_t frequency(void *unused) { return 60; }
 
-void brain_tic_hook(lua_State *lua, lua_Debug *debug) {
-    if (budget == 0)
-        luaL_error(lua, "Frame instruction limit exceeded");
+bool brain_tic_budget(void) {
+    if (budget == 0 || brain_tic_trace_budget == 0) return false;
     --budget;
+    return true;
+}
+
+int brain_tic_backend(bool jit) {
+    if (memory) return -1;
+    Languages[0] = jit ? &LuaSyntaxConfig : &brain_lua_LuaSyntaxConfig;
+    return 0;
 }
 
 // The upstream chunk loader assumes complete input and NUL-terminated code.
@@ -95,6 +101,7 @@ int brain_tic_init(const u8 *cart, size_t length) {
 int brain_tic_step(void) {
     if (!memory || result) return result ? result : -1;
     budget = 2000; // shortcut: 20M instructions allow Quest's map initialization; tune after device profiling.
+    brain_tic_trace_budget = 2000000;
     memory->ram->input = input;
     tic_core_tick_start(memory);
     tic_core_tick(memory, &tick_data);

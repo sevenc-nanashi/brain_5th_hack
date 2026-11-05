@@ -12,6 +12,7 @@ pub enum Mode {
     Pixels,
     Settings,
     Audio,
+    Fpu,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -27,6 +28,8 @@ pub struct Input {
     pub locked: bool,
     pub window_clip: bool,
     pub panic_confirm: bool,
+    pub fpu_requested: bool,
+    fpu_enter_down: bool,
     pub history: [KeyEvent; 16],
     pub count: usize,
     pub cursor: (usize, usize),
@@ -41,6 +44,8 @@ impl Default for Input {
             locked: false,
             window_clip: true,
             panic_confirm: false,
+            fpu_requested: false,
+            fpu_enter_down: false,
             history: [KeyEvent::default(); 16],
             count: 0,
             cursor: (400, 240),
@@ -81,6 +86,9 @@ impl Input {
         self.history[0] = event;
         self.count = (self.count + 1).min(self.history.len());
         let down = event.kind != peg::PM_KEY_UP;
+        if event.key == key::ENTER && !down {
+            self.fpu_enter_down = false;
+        }
         if event.key == key::SHIFT {
             if down {
                 if self.shift_since.is_none() {
@@ -109,6 +117,22 @@ impl Input {
         if let Some(mode) = mode {
             if down && !self.locked {
                 self.mode = mode;
+                self.fpu_requested = false;
+            }
+            return true;
+        }
+        if self.mode == Mode::Settings && matches!(event.key, 0x46 | 0x66) {
+            if down && !self.locked && !self.panic_confirm {
+                self.mode = Mode::Fpu;
+            }
+            return true;
+        }
+        if self.mode == Mode::Fpu && event.key == key::ENTER {
+            if down {
+                if !self.fpu_enter_down && !self.locked {
+                    self.fpu_requested = true;
+                }
+                self.fpu_enter_down = true;
             }
             return true;
         }
@@ -151,5 +175,45 @@ impl Input {
                 usize::from(y).min(HEIGHT - 1),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fpu_controls_require_unlock_and_a_fresh_press() {
+        let mut input = Input::default();
+        let event = |key, kind| KeyEvent {
+            key,
+            kind,
+            flags: 0,
+        };
+        input.key(event(key::SELECT_FROM_LIST, peg::PM_KEY), 0);
+        input.panic_confirm = true;
+        input.key(event(0x46, peg::PM_KEY), 0);
+        assert!(input.mode == Mode::Settings);
+        input.panic_confirm = false;
+        input.locked = true;
+        input.key(event(0x46, peg::PM_KEY), 0);
+        assert!(input.mode == Mode::Settings);
+        input.locked = false;
+        input.key(event(0x66, peg::PM_KEY), 0);
+        assert!(input.mode == Mode::Fpu);
+        input.key(event(key::ENTER, peg::PM_KEY), 0);
+        assert!(core::mem::take(&mut input.fpu_requested));
+        input.key(event(key::ENTER, peg::PM_KEY), 0);
+        assert!(!input.fpu_requested);
+        input.key(event(key::ENTER, peg::PM_KEY_UP), 0);
+        input.locked = true;
+        input.key(event(key::ENTER, peg::PM_KEY), 0);
+        assert!(!input.fpu_requested);
+        input.key(event(key::ENTER, peg::PM_KEY_UP), 0);
+        input.locked = false;
+        input.key(event(key::ENTER, peg::PM_KEY), 0);
+        assert!(input.fpu_requested);
+        input.key(event(key::HOME, peg::PM_KEY), 0);
+        assert!(!input.fpu_requested);
     }
 }

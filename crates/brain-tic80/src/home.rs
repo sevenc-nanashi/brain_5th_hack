@@ -215,14 +215,14 @@ impl Home {
             let rows = [
                 ("Arrows", "Move: Up / Down / Left / Right"),
                 ("Z / X / A / S", "Gamepad: A / B / X / Y"),
-                ("Letters / numbers", "Keyboard input"),
+                ("A1 / symbols", "ABC / 123 / symbols"),
                 ("Space / Enter / Del", "Space / Enter / Backspace"),
                 ("Shift / symbols", "Keyboard input"),
                 ("Touch / drag", "Mouse / Left button"),
                 ("List", "Browse games"),
                 ("History", "Debug menu"),
                 ("My dictionary", "FPS on/off"),
-                ("Home / Esc", "Save and return home"),
+                ("Home", "Save and return home"),
             ];
             for (row, (button, action)) in rows.iter().enumerate() {
                 label(pixels, 40, 106 + row * 28, button, GOLD, BG, 1);
@@ -232,7 +232,7 @@ impl Home {
                 pixels,
                 40,
                 390,
-                "Keyboard: use alphabet input mode",
+                "123: QWERTYUIOP = 1234567890",
                 MUTED,
                 BG,
                 1,

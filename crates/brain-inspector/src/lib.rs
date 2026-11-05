@@ -1,4 +1,5 @@
 #![no_std]
+pub mod fpu;
 pub mod input;
 use core::fmt::{self, Write};
 use input::{Input, Mode};
@@ -6,6 +7,7 @@ use reflex::display::{HEIGHT, WIDTH};
 
 #[derive(Clone, Copy, Default)]
 pub struct Measurements {
+    pub fpu: fpu::Measurements,
     pub audio: AudioMeasurements,
     pub screen: [i16; 4],
     pub pm_real: [i16; 4],
@@ -174,6 +176,83 @@ pub fn render(pixels: &mut [u16], m: &Measurements, edge: usize, input: &Input) 
         color: 0xffff,
         scale: 2,
     };
+    if input.mode == Mode::Fpu {
+        c.pixels.fill(0);
+        c.at(28, 24, 0xffff);
+        write!(c, "FPU TEST").unwrap();
+        c.scale = 1;
+        let f = &m.fpu;
+        c.at(28, 70, 0xffe0);
+        let result = match f.status {
+            fpu::Status::Idle => "READY",
+            fpu::Status::NoAccess => "NO ACCESS",
+            fpu::Status::Unsupported => "UNSUPPORTED",
+            fpu::Status::Pass => "PASS",
+            fpu::Status::Fail => "FAIL",
+        };
+        write!(
+            c,
+            "{}  ENTER:RUN",
+            if input.fpu_requested {
+                "QUEUED"
+            } else {
+                result
+            }
+        )
+        .unwrap();
+        c.at(28, 100, 0xffff);
+        write!(c, "(1.5 + 2.25) * 2 / 3 = 2.5   F64 LOOPS {}", fpu::ROUNDS).unwrap();
+        if f.status != fpu::Status::Idle {
+            c.at(28, 132, 0xffff);
+            write!(c, "CPACR {:08X}", f.cpacr).unwrap();
+        }
+        if matches!(
+            f.status,
+            fpu::Status::Pass | fpu::Status::Fail | fpu::Status::Unsupported
+        ) {
+            c.at(28, 156, 0xffff);
+            write!(
+                c,
+                "FPEXC BEFORE {:08X}   MVFR0 {:08X}",
+                f.raw.fpexc, f.raw.mvfr0
+            )
+            .unwrap();
+            c.at(28, 180, 0xffff);
+            write!(
+                c,
+                "CPSR {:08X}   IRQ {}",
+                f.raw.cpsr,
+                if f.raw.cpsr & 0x80 == 0 {
+                    "UNMASKED"
+                } else {
+                    "MASKED"
+                }
+            )
+            .unwrap();
+            c.at(28, 204, 0xffff);
+            write!(
+                c,
+                "FPSCR BEFORE {:08X}   TEST {:08X}",
+                f.raw.fpscr, f.raw.fpscr_after
+            )
+            .unwrap();
+            c.at(28, 240, 0xffff);
+            write!(c, "F32 {:08X}          EXPECT 40200000", f.raw.single).unwrap();
+            c.at(28, 264, 0xffff);
+            write!(c, "F64 {:016X}  EXPECT 4004000000000000", f.raw.double).unwrap();
+            c.at(28, 300, 0xffff);
+            write!(
+                c,
+                "D0-D31 BAD MASK {:08X}   EXPECT 00000000",
+                f.bad_registers
+            )
+            .unwrap();
+            c.at(28, 336, 0xffff);
+            write!(c, "ELAPSED {} US", f.elapsed_us).unwrap();
+        }
+        status(&mut c, input);
+        return;
+    }
     if input.mode == Mode::Audio {
         c.scale = 1;
         c.pixels.fill(0);
@@ -398,6 +477,8 @@ pub fn render(pixels: &mut [u16], m: &Measurements, edge: usize, input: &Input) 
     .unwrap();
     c.at(28, 270, 0xffff);
     write!(c, "LEFT:OFF RIGHT:ON").unwrap();
+    c.at(28, 294, 0xffe0);
+    write!(c, "F: FPU TEST").unwrap();
     c.at(28, 318, 0xffe0);
     write!(c, "SHIFT P: PANIC TEST").unwrap();
     if input.panic_confirm {
@@ -429,6 +510,7 @@ fn status(c: &mut Canvas<'_>, input: &Input) {
         Mode::Pixels => "PIXELS",
         Mode::Settings => "SETTINGS",
         Mode::Audio => "AUDIO",
+        Mode::Fpu => "FPU",
     };
     c.at(28, top + 2, 0xffe0);
     write!(

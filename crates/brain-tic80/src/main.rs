@@ -8,7 +8,7 @@ use brain_explorer::{
     device::{Device, path},
 };
 use brain_tic80::home::{Choice, Home, game_id};
-use brain_tic80::{Input, debug, engine, paint};
+use brain_tic80::{Input, InputMode, debug, engine, paint};
 use core::{
     ffi::{CStr, c_void},
     ptr,
@@ -29,6 +29,8 @@ struct Player {
     failed: bool,
     error: String,
     input: Input,
+    input_mode: InputMode,
+    mode_down: bool,
     next_frame_us: u64,
     explorer: Explorer<Device>,
     browsing: bool,
@@ -40,6 +42,8 @@ struct Player {
     show_fps: bool,
     debug_keys: u8,
     reset_down: bool,
+    jit: bool,
+    jit_down: bool,
     performance: debug::Performance,
     home: Home,
     home_visible: bool,
@@ -58,6 +62,8 @@ fn main() -> Player {
         failed: false,
         error: String::new(),
         input: Input::default(),
+        input_mode: InputMode::default(),
+        mode_down: false,
         next_frame_us: 0,
         explorer: Explorer::picker(Device, b"tic"),
         browsing: false,
@@ -69,6 +75,8 @@ fn main() -> Player {
         show_fps: false,
         debug_keys: 0,
         reset_down: false,
+        jit: false,
+        jit_down: false,
         performance: debug::Performance::default(),
         home: Home::new("TIC-80", br"SD0:\APP\TIC80\cart.tic", b"tic"),
         home_visible: true,
@@ -192,6 +200,8 @@ impl Player {
         self.list_down = false;
         self.debug_keys = 0;
         self.reset_down = false;
+        self.jit_down = false;
+        self.mode_down = false;
         self.input = Input::default();
         self.send_input();
         Action::Redraw
@@ -222,6 +232,7 @@ impl Player {
         let result = unsafe {
             stack::run(|| {
                 engine::brain_tic_close();
+                assert_eq!(engine::brain_tic_backend(self.jit), 0);
                 engine::brain_tic_init(data.as_ptr(), data.len())
             })
         };
@@ -273,11 +284,13 @@ impl Player {
     fn toggle_debug(&mut self) -> Action {
         self.debug_menu = !self.debug_menu;
         self.reset_down = false;
+        self.jit_down = false;
         self.input = Input::default();
         self.send_input();
         Action::Redraw
     }
     fn toggle_browser(&mut self) -> Action {
+        self.mode_down = false;
         if self.browsing {
             self.browsing = false;
             self.home.reset_input();
@@ -328,7 +341,7 @@ impl Player {
         unsafe {
             engine::brain_tic_input(
                 self.input.buttons(),
-                self.input.keyboard(),
+                self.input.keyboard(self.input_mode),
                 self.input.x,
                 self.input.y,
                 self.input.touch,
@@ -383,6 +396,7 @@ impl Application for Player {
                     | peg::key::SELECT_FROM_LIST
                     | peg::key::HISTORY
                     | peg::key::MY_DICTIONARY
+                    | peg::key::INPUT_MODE
             ))
         {
             // Consume repeats/releases too, rather than forwarding the List key to the host.
@@ -508,8 +522,46 @@ impl Application for Player {
         if self.browsing {
             return self.browse(event);
         }
+        if let Event::Key {
+            code: peg::key::INPUT_MODE,
+            down,
+            ..
+        } = event
+        {
+            let switch = down && !self.mode_down;
+            self.mode_down = down;
+            if switch {
+                self.input_mode = self.input_mode.next();
+                self.input = Input::default();
+                self.send_input();
+                return Action::Redraw;
+            }
+            return Action::None;
+        }
         if self.debug_menu {
             match event {
+                Event::Key {
+                    code: 0x4a | 0x6a,
+                    down,
+                    ..
+                } => {
+                    let switch = down && !self.jit_down;
+                    self.jit_down = down;
+                    if !switch {
+                        return Action::None;
+                    }
+                    if let Err(error) = self.save_pmem() {
+                        self.save_error = Some(error);
+                        return Action::Redraw;
+                    }
+                    self.jit = !self.jit;
+                    self.started = false;
+                    self.failed = false;
+                    self.resume = false;
+                    self.input = Input::default();
+                    self.send_input();
+                    return Action::Redraw;
+                }
                 Event::Key {
                     code: peg::key::ESCAPE,
                     down: true,
@@ -534,9 +586,8 @@ impl Application for Player {
         match event {
             Event::Key {
                 code: peg::key::ESCAPE,
-                down: true,
                 ..
-            } => return self.return_home(),
+            } => return Action::None,
             Event::Key { code, down, .. } => self.input.key(code, down),
             Event::Touch { x, y, phase } => self.input.pointer(x, y, phase != TouchPhase::Up),
         }
@@ -557,7 +608,7 @@ impl Application for Player {
         }
         if self.failed {
             let message =
-                alloc::format!("TIC-80\n\n{}\n\nList  Select game\nEsc  Home", self.error);
+                alloc::format!("TIC-80\n\n{}\n\nList  Select game\nHome  Home", self.error);
             for (line, chunk) in message
                 .lines()
                 .flat_map(|s| s.as_bytes().chunks(62))
@@ -592,7 +643,7 @@ impl Application for Player {
             reflex::text::draw(
                 |x, y, c| pixels[y * display::WIDTH + x] = c,
                 16,
-                448,
+                426,
                 error,
                 0xffff,
                 0xa900,
@@ -608,7 +659,11 @@ impl Application for Player {
                 &self.performance,
                 &debug::Audio::default(),
                 self.show_fps,
+                self.jit,
             );
+        }
+        if self.started && !self.failed {
+            debug::keymap(pixels, self.input_mode);
         }
     }
     fn before_draw(&mut self, _: peg::Rect) {

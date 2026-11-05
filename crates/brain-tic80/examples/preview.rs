@@ -1,4 +1,4 @@
-use brain_tic80::{HEIGHT, Input, WIDTH, debug, engine, paint};
+use brain_tic80::{HEIGHT, Input, InputMode, WIDTH, debug, engine, paint};
 use std::{ffi::CStr, fs, io::Write, path::Path};
 
 fn check(result: i32) {
@@ -36,6 +36,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
     let cartridge = args.next().expect("preview CARTRIDGE OUTPUT_DIRECTORY");
     let output = args.next().expect("preview CARTRIDGE OUTPUT_DIRECTORY");
+    let jit = match args.next().as_deref() {
+        None | Some("lua") => false,
+        Some("luajit") => true,
+        Some(_) => panic!("Expected lua or luajit"),
+    };
     let output = Path::new(&output);
     fs::create_dir_all(output)?;
     let data = fs::read(cartridge)?;
@@ -43,12 +48,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut audio = Vec::new();
     let mut pixels = vec![0; reflex::display::WIDTH * reflex::display::HEIGHT];
     unsafe {
+        check(engine::brain_tic_backend(jit));
         check(engine::brain_tic_init(data.as_ptr(), data.len()));
         let mut input = Input::default();
         for frame in 0..120 {
             input.key(b'Z' as u16, frame % 30 == 0);
             input.key(reflex::peg::key::RIGHT, frame < 20);
-            engine::brain_tic_input(input.buttons(), input.keyboard(), 0, 0, false);
+            engine::brain_tic_input(
+                input.buttons(),
+                input.keyboard(InputMode::Letters),
+                0,
+                0,
+                false,
+            );
             check(engine::brain_tic_fill(pcm.as_mut_ptr(), pcm.len()));
             for sample in &pcm {
                 audio.extend_from_slice(&sample.to_le_bytes());
@@ -59,7 +71,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         assert!(pixels.iter().any(|&p| p != 0), "blank cartridge output");
         engine::brain_tic_close();
     }
-    save(&pixels, &output.join("tic80.ppm"))?;
+    for (mode, name) in [
+        (InputMode::Numbers, "numbers.ppm"),
+        (InputMode::Symbols, "symbols.ppm"),
+        (InputMode::Letters, "tic80.ppm"),
+    ] {
+        debug::keymap(&mut pixels, mode);
+        save(&pixels, &output.join(name))?;
+    }
     let mut performance = debug::Performance::default();
     performance.reset(0, 0);
     for frame in (2..=60).step_by(2) {
@@ -71,7 +90,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!((performance.fps, performance.emulation_fps), (30, 60));
     debug::hud(&mut pixels, &performance);
     save(&pixels, &output.join("fps.ppm"))?;
-    debug::menu(&mut pixels, &performance, &debug::Audio::default(), true);
+    debug::menu(
+        &mut pixels,
+        &performance,
+        &debug::Audio::default(),
+        true,
+        jit,
+    );
     save(&pixels, &output.join("debug.ppm"))?;
     assert!(performance.sample(2_000_000, 60));
     assert_eq!((performance.fps, performance.emulation_fps), (0, 0));
@@ -91,23 +116,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Exercise the C boundary with malformed input, script errors and repeated teardown.
     unsafe {
-        for invalid in [&[][..], &[5, 255, 255, 0][..], &[19, 0, 0, 0][..]] {
-            assert_eq!(engine::brain_tic_init(invalid.as_ptr(), invalid.len()), -1);
-            engine::brain_tic_close();
-        }
-        for (code, expected) in [
-            ("function TIC() error('expected failure') end", -1),
-            ("function TIC() while true do end end", -1),
-            ("function TIC() exit() end", 1),
-            ("function TIC() cls(4) end", 0),
-        ] {
-            let data = cart(code);
-            check(engine::brain_tic_init(data.as_ptr(), data.len()));
-            assert_eq!(
-                engine::brain_tic_fill(pcm.as_mut_ptr(), pcm.len()),
-                expected
-            );
-            engine::brain_tic_close();
+        for jit in [false, true, false] {
+            check(engine::brain_tic_backend(jit));
+            for invalid in [&[][..], &[5, 255, 255, 0][..], &[19, 0, 0, 0][..]] {
+                assert_eq!(engine::brain_tic_init(invalid.as_ptr(), invalid.len()), -1);
+                engine::brain_tic_close();
+            }
+            if jit {
+                let data = cart(
+                    "function TIC() local sum=0 for i=1,10000 do sum=sum+i end assert(sum==50005000) assert(jit.status()) assert(require('jit.util').traceinfo(1), 'No compiled trace') end",
+                );
+                check(engine::brain_tic_init(data.as_ptr(), data.len()));
+                check(engine::brain_tic_step());
+                engine::brain_tic_close();
+            }
+            for (code, expected) in [
+                ("function TIC() error('expected failure') end", -1),
+                ("function TIC() while true do end end", -1),
+                ("function TIC() exit() end", 1),
+                ("function TIC() cls(4) end", 0),
+            ] {
+                let data = cart(code);
+                check(engine::brain_tic_init(data.as_ptr(), data.len()));
+                assert_eq!(
+                    engine::brain_tic_fill(pcm.as_mut_ptr(), pcm.len()),
+                    expected
+                );
+                engine::brain_tic_close();
+            }
         }
     }
     println!(

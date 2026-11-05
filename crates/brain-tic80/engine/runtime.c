@@ -11,6 +11,20 @@ extern void tic_free(void *);
 extern void *tic_realloc(void *, size_t);
 extern void tic_panic(void) __attribute__((noreturn));
 
+// Publish generated ARM instructions to the Cortex-A7's instruction cache.
+void __clear_cache(void *start, void *end) {
+    uint32_t ctr;
+    __asm__ volatile("mrc p15, 0, %0, c0, c0, 1" : "=r"(ctr));
+    uintptr_t dline = 4u << ((ctr >> 16) & 15);
+    uintptr_t iline = 4u << (ctr & 15);
+    for (uintptr_t p = (uintptr_t)start & ~(dline - 1); p < (uintptr_t)end; p += dline)
+        __asm__ volatile("mcr p15, 0, %0, c7, c11, 1" : : "r"(p) : "memory");
+    __asm__ volatile("dsb sy" : : : "memory");
+    for (uintptr_t p = (uintptr_t)start & ~(iline - 1); p < (uintptr_t)end; p += iline)
+        __asm__ volatile("mcr p15, 0, %0, c7, c5, 1" : : "r"(p) : "memory");
+    __asm__ volatile("dsb sy\nisb sy" : : : "memory");
+}
+
 int _gettimeofday(struct timeval *tv, void *tz) {
     // V690_H1 control 0x30013 reads the local RTC; see docs/clock.md.
     struct {
@@ -62,6 +76,7 @@ void _free_r(struct _reent *r, void *p) { free(p); }
 void *_realloc_r(struct _reent *r, void *p, size_t n) { return realloc(p, n); }
 void *_calloc_r(struct _reent *r, size_t n, size_t s) { return calloc(n, s); }
 void abort(void) { tic_panic(); }
+void exit(int code) { tic_panic(); }
 void _exit(int code) { tic_panic(); }
 void __assert_func(const char *file, int line, const char *function, const char *expression) { tic_panic(); }
 // The application discards ARM unwind tables and must never unwind through Rust.

@@ -2,6 +2,36 @@ extern crate alloc;
 use alloc::format;
 use reflex::{display::WIDTH, text};
 
+pub fn keymap(pixels: &mut [u16], mode: crate::InputMode) {
+    for y in 454..480 {
+        pixels[y * WIDTH..y * WIDTH + 800].fill(0x0863);
+    }
+    let controls =
+        "Arrows Move   Z/X/A/S A/B/X/Y   Space/Enter/Del Keys   Shift Symbols   Touch Mouse";
+    let navigation = format!(
+        "{}   Home Menu   List Browse   History Debug   MyDict FPS",
+        mode.hint()
+    );
+    for (row, line) in [controls, navigation.as_str()].iter().enumerate() {
+        // Chunk before drawing because text::draw clips at its original, full-size width.
+        for (part, chunk) in line.as_bytes().chunks(64).enumerate() {
+            text::draw(
+                |x, y, color| {
+                    if x % 2 == 0 && y % 2 == 0 {
+                        pixels[(454 + row * 13 + y / 2) * WIDTH + 16 + part * 384 + x / 2] = color;
+                    }
+                },
+                0,
+                0,
+                core::str::from_utf8(chunk).unwrap(),
+                0xff9b,
+                0x0863,
+                1,
+            );
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct Performance {
     since: u64,
@@ -75,7 +105,13 @@ pub fn hud(pixels: &mut [u16], performance: &Performance) {
     );
 }
 
-pub fn menu(pixels: &mut [u16], performance: &Performance, audio: &Audio, show_fps: bool) {
+pub fn menu(
+    pixels: &mut [u16],
+    performance: &Performance,
+    audio: &Audio,
+    show_fps: bool,
+    jit: bool,
+) {
     for y in 60..420 {
         pixels[y * WIDTH + 112..y * WIDTH + 688].fill(0x18e3);
     }
@@ -85,6 +121,7 @@ pub fn menu(pixels: &mut [u16], performance: &Performance, audio: &Audio, show_f
     };
     let lines = [
         "TIC-80 DEBUG".into(),
+        format!("Engine            {}", if jit { "LuaJIT" } else { "Lua" }),
         format!("Display FPS       {}", performance.fps),
         format!("Emulation FPS     {}", performance.emulation_fps),
         format!("Frame CPU         {} us", performance.frame_us),
@@ -97,13 +134,17 @@ pub fn menu(pixels: &mut [u16], performance: &Performance, audio: &Audio, show_f
             if show_fps { "ON" } else { "OFF" }
         ),
         "R                 Reset counters".into(),
+        format!(
+            "J                 Restart with {}",
+            if jit { "Lua" } else { "LuaJIT" }
+        ),
         "History / Esc     Close".into(),
     ];
     for (row, line) in lines.iter().enumerate() {
         text::draw(
             |x, y, c| pixels[y * WIDTH + x] = c,
             136,
-            78 + row * 29,
+            78 + row * 26,
             line,
             0xffff,
             0x18e3,
