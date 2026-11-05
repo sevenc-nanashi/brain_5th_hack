@@ -443,6 +443,20 @@ impl<F: Filesystem> Application for Explorer<F> {
                     return Action::None;
                 }
                 self.keys_down[word] |= mask;
+                if code == key::HOME {
+                    // Returning to Storage must not depend on a readable parent directory.
+                    self.error = self.cancel_copy().err();
+                    self.folders.clear();
+                    self.entries = roots();
+                    self.selected = 0;
+                    self.top = 0;
+                    self.viewer = None;
+                    self.dialog = None;
+                    self.pressed = None;
+                    self.send_requested = false;
+                    self.picked = None;
+                    return Action::Redraw;
+                }
                 if self.dialog.is_some() || self.copying.is_some() {
                     return self.operation_key(code, flags);
                 }

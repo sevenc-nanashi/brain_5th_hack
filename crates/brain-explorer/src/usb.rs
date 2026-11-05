@@ -379,6 +379,21 @@ impl Application for Sender {
     }
     fn event(&mut self, event: Event) -> Action {
         if self.state != State::Browsing {
+            if matches!(
+                event,
+                Event::Key {
+                    code: key::HOME,
+                    down: true,
+                    ..
+                }
+            ) {
+                self.explorer.event(event);
+                self.explorer.reset_input();
+                if self.state != State::Stopping {
+                    self.stop();
+                }
+                return Action::Redraw;
+            }
             let cancel = match event {
                 Event::Key {
                     code: key::ESCAPE,

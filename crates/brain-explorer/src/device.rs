@@ -110,7 +110,8 @@ fn writable(value: &[u8]) -> Result<CString, &'static str> {
 fn absent(value: &CStr) -> Result<(), &'static str> {
     match unsafe { fs::metadata(value) } {
         Ok(_) => Err("Destination already exists"),
-        Err(-0x4603) => Ok(()),
+        // V690_H1 FAT lookup returns -0x460d at system.bin:0x184b4.
+        Err(-0x460d) => Ok(()),
         Err(_) => Err("Cannot check destination"),
     }
 }
