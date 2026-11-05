@@ -299,23 +299,58 @@ fn operations<F: Filesystem>(app: &Explorer<F>, c: &mut Canvas<'_>) {
     c.text(16, 64, &shorten(&escaped(&app.path(None)), 125), MUTED, 1);
     let mut confirm = None;
     if let Some(copy) = &app.copying {
-        c.text(16, 104, "Copying", INK, 2);
+        c.text(
+            16,
+            104,
+            if copy.scanning() {
+                "Scanning"
+            } else {
+                "Copying"
+            },
+            INK,
+            2,
+        );
         c.text(16, 150, &shorten(&escaped(&copy.source), 125), INK, 1);
         c.text(16, 180, &shorten(&escaped(&copy.destination), 125), INK, 1);
         c.text(
             16,
-            238,
+            214,
             &format!("File: {} / {} bytes", copy.offset, copy.size),
             INK,
-            2,
+            1,
         );
-        c.rect(16, 292, 768, 16, LINE);
-        let progress = if copy.size == 0 {
-            768
+        c.rect(16, 240, 768, 16, LINE);
+        let progress = if copy.scanning() || copy.size == 0 {
+            0
         } else {
             (u64::from(copy.offset) * 768 / u64::from(copy.size)) as usize
         };
-        c.rect(16, 292, progress, 16, ACCENT);
+        c.rect(16, 240, progress, 16, ACCENT);
+        let total = if copy.scanning() {
+            format!(
+                "Found: {} bytes, {} items",
+                copy.total_bytes, copy.total_items
+            )
+        } else {
+            format!(
+                "Total: {} / {} bytes ({}%)",
+                copy.copied_bytes,
+                copy.total_bytes,
+                copy.progress(100)
+            )
+        };
+        c.text(16, 286, &total, INK, 1);
+        if !copy.scanning() {
+            c.text(
+                16,
+                314,
+                &format!("Items: {} / {}", copy.copied_items, copy.total_items),
+                INK,
+                1,
+            );
+            c.rect(16, 342, 768, 16, LINE);
+            c.rect(16, 342, copy.progress(768) as usize, 16, ACCENT);
+        }
     } else {
         match app.dialog.as_ref().unwrap() {
             Dialog::Menu(selected) => {

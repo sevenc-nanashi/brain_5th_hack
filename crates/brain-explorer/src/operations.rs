@@ -1,4 +1,5 @@
 use super::*;
+use alloc::collections::VecDeque;
 
 pub(super) const MENU: [&str; 6] = ["Copy", "Cut", "Paste", "Rename", "Delete", "New folder"];
 pub(super) const SYMBOL_KEYS: &[u8] = b"QWERTYUIOPASDFGHJKLZXCVBNM";
@@ -30,8 +31,28 @@ pub(super) struct CopyJob {
     pub file: Vec<u8>,
     pub size: u32,
     pub offset: u32,
+    pub total_bytes: u64,
+    pub copied_bytes: u64,
+    pub total_items: u64,
+    pub copied_items: u64,
     active: bool,
-    pending: Vec<CopyItem>,
+    scan: Vec<CopyItem>,
+    pending: VecDeque<CopyItem>,
+}
+impl CopyJob {
+    pub fn scanning(&self) -> bool {
+        !self.scan.is_empty()
+    }
+
+    pub fn progress(&self, scale: u64) -> u64 {
+        if self.scanning() {
+            0
+        } else if let Some(progress) = (self.copied_bytes * scale).checked_div(self.total_bytes) {
+            progress
+        } else {
+            self.copied_items * scale / self.total_items
+        }
+    }
 }
 struct CopyItem {
     source: Vec<u8>,
@@ -163,8 +184,13 @@ impl<F: Filesystem> Explorer<F> {
                 file: file.clone(),
                 size: 0,
                 offset: 0,
+                total_bytes: 0,
+                copied_bytes: 0,
+                total_items: 0,
+                copied_items: 0,
                 active: false,
-                pending: alloc::vec![CopyItem {
+                pending: VecDeque::new(),
+                scan: alloc::vec![CopyItem {
                     source: clip.source,
                     target: file,
                     entry: current
@@ -228,13 +254,31 @@ impl<F: Filesystem> Explorer<F> {
     }
     fn copy_chunk(&mut self) -> Result<(), &'static str> {
         let job = self.copying.as_mut().unwrap();
-        if !job.active {
-            if let Some(item) = job.pending.pop() {
-                if job.destination.len() + item.target.len() - job.stage.len() - b"\\data".len()
-                    >= 260
-                {
-                    return Err("Path exceeds 259 bytes");
+        if let Some(item) = job.scan.pop() {
+            if job.destination.len() + item.target.len() - job.stage.len() - b"\\data".len() >= 260
+            {
+                return Err("Path exceeds 259 bytes");
+            }
+            if item.entry.directory {
+                for entry in self.fs.read_dir(&item.source)?.into_iter().rev() {
+                    job.scan.push(CopyItem {
+                        source: child(&item.source, &entry.name)?,
+                        target: child(&item.target, &entry.name)?,
+                        entry,
+                    });
                 }
+            } else {
+                if item.entry.size > i32::MAX as u32 {
+                    return Err("Copy supports files up to 2 GiB - 1 byte");
+                }
+                job.total_bytes += u64::from(item.entry.size);
+            }
+            job.total_items += 1;
+            job.pending.push_back(item);
+            return Ok(());
+        }
+        if !job.active {
+            if let Some(item) = job.pending.pop_front() {
                 let current = self.fs.metadata(&item.source)?;
                 if current.directory != item.entry.directory
                     || (!current.directory && current.size != item.entry.size)
@@ -247,17 +291,8 @@ impl<F: Filesystem> Explorer<F> {
                 job.offset = 0;
                 if current.directory {
                     self.fs.create_dir(&job.file)?;
-                    for entry in self.fs.read_dir(&job.source)?.into_iter().rev() {
-                        job.pending.push(CopyItem {
-                            source: child(&job.source, &entry.name)?,
-                            target: child(&job.file, &entry.name)?,
-                            entry,
-                        });
-                    }
+                    job.copied_items += 1;
                 } else {
-                    if job.size > i32::MAX as u32 {
-                        return Err("Copy supports files up to 2 GiB - 1 byte");
-                    }
                     self.fs.create_file(&job.file)?;
                     job.active = true;
                 }
@@ -286,6 +321,7 @@ impl<F: Filesystem> Explorer<F> {
                 return Err("Copy verification failed");
             }
             job.offset += count as u32;
+            job.copied_bytes += count as u64;
         } else {
             let current = self.fs.metadata(&job.source)?;
             if current.directory
@@ -295,6 +331,7 @@ impl<F: Filesystem> Explorer<F> {
                 return Err("Source changed during copy");
             }
             job.active = false;
+            job.copied_items += 1;
         }
         Ok(())
     }
