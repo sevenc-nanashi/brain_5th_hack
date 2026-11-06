@@ -52,6 +52,8 @@ pub const BAR_MAX_SLOTS: usize = 60;
 
 #[derive(Clone, Copy)]
 pub struct BarMeasurements {
+    pub light: bool,
+    pub two_columns: bool,
     pub selected: usize,
     pub slots: usize,
     pub buttons: [usize; BAR_MAX_SLOTS],
@@ -68,6 +70,8 @@ pub struct BarMeasurements {
 impl Default for BarMeasurements {
     fn default() -> Self {
         Self {
+            light: false,
+            two_columns: false,
             selected: 0,
             slots: 3,
             buttons: core::array::from_fn(|i| i % BAR_BUTTONS.len()),
@@ -84,13 +88,47 @@ impl Default for BarMeasurements {
 }
 
 impl BarMeasurements {
+    pub fn columns(&self) -> usize {
+        if self.two_columns { 2 } else { 1 }
+    }
+
+    pub fn item_count(&self) -> usize {
+        self.slots * self.columns()
+    }
+
+    pub fn toggle_columns(&mut self) {
+        self.two_columns = !self.two_columns;
+        self.slots = self.slots.min(BAR_MAX_SLOTS / self.columns());
+        self.selected = self.selected.min(self.item_count() - 1);
+    }
+
+    pub fn toggle_light(&mut self) {
+        self.light = !self.light;
+        for button in &mut self.buttons {
+            let name = BAR_BUTTONS[*button].0;
+            let counterpart = BAR_BUTTONS.iter().position(|&(candidate, _)| {
+                if self.light {
+                    candidate.strip_prefix("LIGHT_") == Some(name)
+                } else {
+                    name.strip_prefix("LIGHT_") == Some(candidate)
+                }
+            });
+            if let Some(index) = counterpart {
+                *button = index;
+            }
+        }
+    }
+
     pub fn shuffle(&mut self, all: bool, mut seed: u32) {
         let slots = if all {
-            0..self.slots
+            0..self.item_count()
         } else {
             self.selected..self.selected + 1
         };
         for slot in slots {
+            if self.two_columns && slot == 0 {
+                continue;
+            }
             seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
             let step = 1 + (seed >> 16) as usize % (BAR_BUTTONS.len() - 1);
             self.buttons[slot] = (self.buttons[slot] + step) % BAR_BUTTONS.len();
@@ -101,19 +139,24 @@ impl BarMeasurements {
     pub fn edit_button(&mut self, key: u16) -> bool {
         use reflex::peg::key;
         match key {
-            key::DOWN => self.selected = (self.selected + self.slots - 1) % self.slots,
-            key::UP => self.selected = (self.selected + 1) % self.slots,
+            key::DOWN => {
+                self.selected = (self.selected + self.item_count() - 1) % self.item_count()
+            }
+            key::UP => self.selected = (self.selected + 1) % self.item_count(),
             key::PAGE_UP | key::PAGE_DOWN => {
                 let previous = self.slots;
                 self.slots = if key == key::PAGE_UP {
-                    (self.slots + 1).min(BAR_MAX_SLOTS)
+                    (self.slots + 1).min(BAR_MAX_SLOTS / self.columns())
                 } else {
                     self.slots.saturating_sub(1).max(1)
                 };
-                self.selected = self.selected.min(self.slots - 1);
+                self.selected = self.selected.min(self.item_count() - 1);
                 return self.slots != previous;
             }
             key::LEFT | key::RIGHT => {
+                if self.two_columns && self.selected == 0 {
+                    return false;
+                }
                 let step = if key == key::RIGHT {
                     1
                 } else {
@@ -285,6 +328,14 @@ pub fn render(pixels: &mut [u16], m: &Measurements, edge: usize, input: &Input) 
         write!(c, "OPERATION BAR").unwrap();
         c.scale = 1;
         let b = &m.bar;
+        c.at(500, 30, 0xffe0);
+        write!(
+            c,
+            "L {}   O COLUMNS {}",
+            if b.light { "LIGHT" } else { "DARK" },
+            b.columns()
+        )
+        .unwrap();
         for (y, text) in [
             (
                 70,
@@ -300,14 +351,16 @@ pub fn render(pixels: &mut [u16], m: &Measurements, edge: usize, input: &Input) 
             write!(c, "{text}").unwrap();
         }
         let start = b.selected / 9 * 9;
-        let end = (start + 9).min(b.slots);
+        let end = (start + 9).min(b.item_count());
         c.at(28, 142, 0xffe0);
         write!(
             c,
-            "PAGE UP/DOWN  SLOT COUNT (1-{BAR_MAX_SLOTS})    VIEW {}-{} / {}",
+            "PAGE UP/DOWN  ROWS {} (1-{})    VIEW {}-{} / {}",
+            b.slots,
+            BAR_MAX_SLOTS / b.columns(),
             start + 1,
             end,
-            b.slots
+            b.item_count()
         )
         .unwrap();
         for (row, i) in (start..end).rev().enumerate() {
@@ -316,6 +369,15 @@ pub fn render(pixels: &mut [u16], m: &Measurements, edge: usize, input: &Input) 
                 166 + row * 16,
                 if i == b.selected { 0xffe0 } else { 0xffff },
             );
+            if b.two_columns && i == 0 {
+                write!(
+                    c,
+                    "{} SLOT 1  OPEN / CLOSE",
+                    if i == b.selected { "*" } else { " " }
+                )
+                .unwrap();
+                continue;
+            }
             let (name, image) = BAR_BUTTONS[b.buttons[i]];
             write!(
                 c,
@@ -334,9 +396,9 @@ pub fn render(pixels: &mut [u16], m: &Measurements, edge: usize, input: &Input) 
         c.at(28, 318, 0xffff);
         write!(
             c,
-            "HANDLE {:08X}   SLOTS {}   SLOT {} ITEM {:08X}",
+            "HANDLE {:08X}   ITEMS {}   SLOT {} ITEM {:08X}",
             b.handle,
-            b.slots,
+            b.item_count(),
             b.selected + 1,
             b.items[b.selected]
         )

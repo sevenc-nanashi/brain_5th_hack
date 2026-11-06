@@ -1,6 +1,6 @@
 use brain_inspector::{BAR_BUTTONS, BarImage, BarMeasurements, bar_image};
 use core::ffi::c_void;
-use reflex::operation_bar::{Config, raw};
+use reflex::operation_bar::{Config, image, raw};
 use reflex::peg::key;
 
 pub const MESSAGE: u16 = 0x10b;
@@ -36,7 +36,12 @@ impl Bar {
             return;
         }
         m.call = "CREATE";
-        self.handle = unsafe { raw::create(window, 0, &Config::pcconnect(m.slots as u8), 0) };
+        let mut config = Config::pcconnect(m.slots as u8);
+        if m.light {
+            config.background_color = 0x00dc_dcdc;
+            config.boundary_color = 0;
+        }
+        self.handle = unsafe { raw::create(window, 0, &config, 0) };
         m.handle = self.handle as u32;
         m.result = i32::from(!self.handle.is_null());
         if self.handle.is_null() {
@@ -45,23 +50,48 @@ impl Bar {
         unsafe { raw::suspend_updates(self.handle, 1) };
         let normal = bar_image::bitmap(false);
         let pressed = bar_image::bitmap(true);
-        for (i, button) in m.buttons.into_iter().take(m.slots).enumerate() {
+        for (i, button) in m.buttons.into_iter().take(m.item_count()).enumerate() {
             let (_, image) = BAR_BUTTONS[button];
-            // shortcut: PCConnect's one-state image descriptor; other layouts need ABI analysis.
+            // PCConnect's image descriptor, plus DicMain's two-state expand button.
             let mut item = [0u32; 0x220 / 4];
             item[0] = 0x21;
             item[1] = u32::from(MESSAGE) | ((i as u32 + 1) << 16);
             item[4] = 52;
             item[5] = 52;
-            match image {
-                BarImage::Resource(normal_id, pressed_id) => {
-                    item[0x24 / 4] = normal_id;
-                    item[0x44 / 4] = pressed_id;
-                }
-                BarImage::RustLogo => {
-                    // SharpLib 0x10fae8 wraps this bitmap and copies its pixels during add_item.
-                    item[0x20 / 4] = core::ptr::from_ref(&normal) as u32;
-                    item[0x40 / 4] = core::ptr::from_ref(&pressed) as u32;
+            if m.two_columns && i == 0 {
+                // DicMain 0x370a64: bit 0x4000 expands groups; 0x100 suppresses notification.
+                item[0] = 0x4121;
+                item[1] = 0;
+                let (open, open_pressed, close, close_pressed) = if m.light {
+                    (
+                        image::LIGHT_OPEN_ARROW,
+                        image::LIGHT_OPEN_ARROW_PRESSED,
+                        image::LIGHT_CLOSE_ARROW,
+                        image::LIGHT_CLOSE_ARROW_PRESSED,
+                    )
+                } else {
+                    (
+                        image::OPEN_ARROW,
+                        image::OPEN_ARROW_PRESSED,
+                        image::CLOSE_ARROW,
+                        image::CLOSE_ARROW_PRESSED,
+                    )
+                };
+                item[0x24 / 4] = open;
+                item[0x44 / 4] = open_pressed;
+                item[0xa4 / 4] = close;
+                item[0xc4 / 4] = close_pressed;
+            } else {
+                match image {
+                    BarImage::Resource(normal_id, pressed_id) => {
+                        item[0x24 / 4] = normal_id;
+                        item[0x44 / 4] = pressed_id;
+                    }
+                    BarImage::RustLogo => {
+                        // SharpLib 0x10fae8 wraps this bitmap and copies its pixels during add_item.
+                        item[0x20 / 4] = core::ptr::from_ref(&normal) as u32;
+                        item[0x40 / 4] = core::ptr::from_ref(&pressed) as u32;
+                    }
                 }
             }
             m.items[i] = unsafe { raw::add_item(self.handle, 0, item.as_ptr().cast()) };
@@ -102,7 +132,9 @@ impl Bar {
             key::RIGHT => 1024,
             key::PAGE_UP => 2048,
             key::PAGE_DOWN => 4096,
-            0x54 | 0x74 => 8192, // T: random image
+            0x54 | 0x74 => 8192,  // T: random image
+            0x4c | 0x6c => 16384, // L: light/dark theme
+            0x4f | 0x6f => 32768, // O: one/two columns
             _ => return false,
         };
         if released {
@@ -120,6 +152,20 @@ impl Bar {
                         16 => self.control(4, m),
                         32 => self.control(8, m),
                         64 => self.control(0x0a, m),
+                        16384 => {
+                            m.toggle_light();
+                            if !self.handle.is_null() {
+                                self.close(m);
+                                self.create(window, m);
+                            }
+                        }
+                        32768 => {
+                            m.toggle_columns();
+                            if !self.handle.is_null() {
+                                self.close(m);
+                                self.create(window, m);
+                            }
+                        }
                         8192 => {
                             let now = reflex::runtime::micros();
                             m.shuffle(
