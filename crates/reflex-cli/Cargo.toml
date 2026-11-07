@@ -12,3 +12,4 @@ anyhow.workspace = true
 usage-rs = "7.1.3"
 serde.workspace = true
 serde_json.workspace = true
+sha2 = "0.10"

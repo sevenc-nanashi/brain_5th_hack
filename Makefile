@@ -4,7 +4,7 @@ BUILD_DIR ?= target
 REFLEX = $(CARGO) run --quiet -p reflex-cli -- --target-dir "$(BUILD_DIR)" --objcopy "$(OBJCOPY)"
 
 .PHONY: tic80 tic80-fetch tic80-preview tetris tetris-preview hello-world doom inspector calculator explorer browser pocketjs doom-fetch browser-fetch doom-preview calculator-preview browser-preview pocketjs-preview
-hello-world doom inspector calculator explorer browser pocketjs tetris tic80:
+hello-world doom inspector calculator explorer browser pocketjs tetris tic80 llm:
 	$(REFLEX) build $@
 
 tic80-fetch:
@@ -38,3 +38,5 @@ pocketjs-preview:
 
 tetris-preview:
 	$(CARGO) run -p brain-tetris --example preview --target-dir $(BUILD_DIR) -- $(BUILD_DIR)/tetris-preview
+
+.PHONY: llm

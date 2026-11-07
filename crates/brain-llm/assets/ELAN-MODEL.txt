@@ -1,0 +1,12 @@
+ElanMT tiny English-to-Japanese
+Original model: ELAN MITSUA Project / Abstract Engine
+https://huggingface.co/Mitsua/elan-mt-tiny-en-ja/tree/b6d2a119e8742c20a0007420a0d9209b6a9bb753
+License: Creative Commons Attribution-ShareAlike 4.0 International
+https://creativecommons.org/licenses/by-sa/4.0/
+See LICENSE-ELAN.txt.
+
+Modifications for Brain: FP16 matrix weights converted to per-row symmetric
+signed INT8 with FP32 scales; vectors retained as FP32. Tokenizer metadata
+repacked from the original SentencePiece model. The derived elan.bin and
+elan.tok are distributed under CC BY-SA 4.0 as well.
+This notice applies to the model and tokenizer, not to the application source.

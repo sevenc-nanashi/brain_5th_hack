@@ -134,6 +134,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "brain-llm"
+version = "0.1.0"
+dependencies = [
+ "libm",
+ "reflex",
+ "sha2",
+]
+
+[[package]]
 name = "brain-pocketjs"
 version = "0.1.0"
 dependencies = [
@@ -491,6 +500,7 @@ dependencies = [
  "anyhow",
  "serde",
  "serde_json",
+ "sha2",
  "usage-rs",
 ]
 

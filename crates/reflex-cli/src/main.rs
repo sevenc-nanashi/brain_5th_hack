@@ -1,10 +1,12 @@
 use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use std::{
     env,
     ffi::OsString,
     fs,
     hash::{DefaultHasher, Hash, Hasher},
+    io::Read,
     path::{Component, Path, PathBuf},
     process::Command,
 };
@@ -76,6 +78,20 @@ struct App {
     inputs: Option<Inputs>,
     #[serde(default)]
     companions: Vec<Companion>,
+    #[serde(default)]
+    downloads: Vec<Download>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Download {
+    filename: String,
+    url: String,
+    sha256: String,
+    #[serde(default = "download_deploy")]
+    deploy: bool,
+}
+fn download_deploy() -> bool {
+    true
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -90,6 +106,20 @@ struct Inputs {
     env: String,
     #[serde(default)]
     assets: Vec<PathBuf>,
+}
+
+fn file_sha256(path: &Path) -> Result<String> {
+    let mut file = fs::File::open(path)?;
+    let mut hash = Sha256::new();
+    let mut buffer = [0; 65536];
+    loop {
+        let n = file.read(&mut buffer)?;
+        if n == 0 {
+            break;
+        }
+        hash.update(&buffer[..n]);
+    }
+    Ok(format!("{:x}", hash.finalize()))
 }
 
 fn run(command: &mut Command) -> Result<()> {
@@ -166,7 +196,64 @@ impl Build<'_> {
         active.push(self.package.name.clone());
         component(&self.app.name)?;
         component(&self.app.output)?;
+        let mut downloaded = Vec::new();
+        for asset in &self.app.downloads {
+            component(&asset.filename)?;
+            ensure!(
+                asset.filename != "AppMain.bin" && asset.filename != "index.din",
+                "reserved download filename"
+            );
+            ensure!(
+                asset.url.starts_with("https://")
+                    && asset.sha256.len() == 64
+                    && asset.sha256.bytes().all(|b| b.is_ascii_hexdigit()),
+                "invalid download metadata"
+            );
+            let cache = self.target.join(&self.app.output).join("downloads");
+            fs::create_dir_all(&cache)?;
+            let path = cache.join(&asset.filename);
+            if !path.exists() {
+                let temporary =
+                    cache.join(format!("{}.{}.part", asset.filename, std::process::id()));
+                let result = (|| -> Result<()> {
+                    run(Command::new("curl")
+                        .args([
+                            "--fail",
+                            "--location",
+                            "--max-time",
+                            "1800",
+                            "--proto",
+                            "=https",
+                            "--proto-redir",
+                            "=https",
+                            &asset.url,
+                            "--output",
+                        ])
+                        .arg(&temporary))?;
+                    ensure!(
+                        file_sha256(&temporary)? == asset.sha256.to_ascii_lowercase(),
+                        "download checksum mismatch: {}",
+                        asset.filename
+                    );
+                    fs::rename(&temporary, &path)?;
+                    Ok(())
+                })();
+                if temporary.exists() {
+                    fs::remove_file(&temporary)?;
+                }
+                result?;
+            }
+            ensure!(
+                file_sha256(&path)? == asset.sha256.to_ascii_lowercase(),
+                "cached checksum mismatch: {}",
+                path.display()
+            );
+            if asset.deploy {
+                downloaded.push((path, &asset.filename));
+            }
+        }
         let mut companions = Vec::new();
+
         for companion in &self.app.companions {
             component(&companion.filename)?;
             ensure!(
@@ -259,7 +346,7 @@ impl Build<'_> {
                 )?;
             }
         }
-        for (source, filename) in companions {
+        for (source, filename) in companions.into_iter().chain(downloaded) {
             fs::copy(source, output.join(filename))?;
         }
         active.pop();

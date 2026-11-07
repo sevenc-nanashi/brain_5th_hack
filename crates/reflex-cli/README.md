@@ -88,3 +88,27 @@ reflex __usage_spec__ > target/reflex.usage.kdl
 # Usage CLIをインストールしている場合
 usage generate markdown --file target/reflex.usage.kdl --multi --out-dir target/reflex-docs
 ```
+
+## ビルド時のモデル取得
+
+`downloads` は `build` / `deploy --build` で取得・検証してアプリへ同梱するファイル。
+既存アプリで設定を省略した場合、ダウンロードは行わない。
+
+```toml
+[[package.metadata.reflex.downloads]]
+filename = "model.bin"
+url = "https://example.com/fixed-revision/model.bin"
+sha256 = "ここに64桁のSHA-256を指定"
+```
+
+キャッシュは `<target-dir>/<output>/downloads/`。初回はcurlで一時ファイルへ取得し、
+SHA-256照合後に確定する。既存キャッシュもビルドごとに検証する。
+不一致はエラーとし、自動で別モデルへ置き換えない。破損キャッシュを削除すると再取得できる。
+取得失敗時は配布を開始しない。
+
+大きなモデルのダウンロードは最大30分待機する。SHA-256はファイルを分割して計算し、
+モデル全体をPCのRAMへ読み込まない。
+
+`[[package.metadata.reflex.downloads]]` の `deploy = false` を指定すると、
+ビルド用キャッシュに取得・検証するだけで配布先へはコピーしない（既定は `true`）。
+モデル変換の入力などに使い、変換結果は `inputs.assets` に列挙する。

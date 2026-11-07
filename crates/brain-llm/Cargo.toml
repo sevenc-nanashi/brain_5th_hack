@@ -1,0 +1,48 @@
+[package]
+name = "brain-llm"
+version = "0.1.0"
+edition.workspace = true
+[features]
+device = ["reflex/application", "reflex/panic-qr"]
+[dependencies]
+reflex = { path = "../reflex", features = ["text"] }
+libm = "0.2.16"
+sha2 = { version = "0.10", default-features = false }
+[[bin]]
+name = "brain-llm"
+required-features = ["device"]
+[package.metadata.reflex]
+name = "LLM"
+output = "llm"
+assets = ["LICENSE-LLAMA2.txt", "../reflex/assets/FONT-LICENSE.txt", "assets/LICENSE-ELAN.txt", "assets/ELAN-MODEL.txt", "assets/FONT-JAPANESE-LICENSE.txt"]
+[[package.metadata.reflex.downloads]]
+filename = "stories260K.bin"
+url = "https://huggingface.co/karpathy/tinyllamas/resolve/0bd21da7698eaf29a0d7de3992de8a46ef624add/stories260K/stories260K.bin"
+sha256 = "b0a507e7ad0f626624f17112325e66691f9076d622e1d3274d103d00299f2696"
+[[package.metadata.reflex.downloads]]
+filename = "tok512.bin"
+url = "https://huggingface.co/karpathy/tinyllamas/resolve/0bd21da7698eaf29a0d7de3992de8a46ef624add/stories260K/tok512.bin"
+sha256 = "037cb335abb25d1fa9e8ecae30ed2a3a8ace9302862ebcdc05d51a6bbb10c312"
+
+[package.metadata.reflex.inputs]
+directory = "llm"
+env = "LLM_INPUTS"
+assets = ["downloads/elan.bin", "downloads/elan.tok"]
+
+[[package.metadata.reflex.downloads]]
+filename = "elan.safetensors"
+url = "https://huggingface.co/Mitsua/elan-mt-tiny-en-ja/resolve/b6d2a119e8742c20a0007420a0d9209b6a9bb753/model.safetensors"
+sha256 = "e7b1dbc30d6a57db761d92596f60b0234c3b41a2d5191185416b4b25b14cab14"
+deploy = false
+
+[[package.metadata.reflex.downloads]]
+filename = "elan-source.spm"
+url = "https://huggingface.co/Mitsua/elan-mt-tiny-en-ja/resolve/b6d2a119e8742c20a0007420a0d9209b6a9bb753/source.spm"
+sha256 = "a6824c2996a4877cae8a0240f11a112ab0e4ea1f22e54cd42179376fe558f4ff"
+deploy = false
+
+[[package.metadata.reflex.downloads]]
+filename = "elan-vocab.json"
+url = "https://huggingface.co/Mitsua/elan-mt-tiny-en-ja/resolve/b6d2a119e8742c20a0007420a0d9209b6a9bb753/vocab.json"
+sha256 = "f508b75734ee21cf16b3816b7b29dea400f1f5998f47b7695cef1979ca49e106"
+deploy = false
