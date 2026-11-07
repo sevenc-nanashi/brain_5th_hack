@@ -133,6 +133,52 @@ const _: () = {
 #[cfg(all(feature = "experimental-peg", target_arch = "arm", target_os = "none"))]
 pub mod raw {
     use super::*;
+    /// CDTimer's window constructor (V690_H1); style bits remain unidentified.
+    ///
+    /// # Safety
+    /// Requires at least 0x190 bytes of aligned host-allocated storage and the
+    /// lifetime/event-context requirements in [`self`].
+    pub unsafe fn floating_window_ctor(window: *mut c_void, style: u32) {
+        unsafe {
+            let call: unsafe extern "C" fn(*mut c_void, *const u16, u32, u32) =
+                core::mem::transmute(0x6000_48a8usize);
+            call(window, core::ptr::null(), 0, style);
+        }
+    }
+    /// # Safety
+    /// Requires a live PEG window and the requirements in [`self`].
+    pub unsafe fn add_status(window: *mut c_void, flags: u32) {
+        unsafe {
+            let call: unsafe extern "C" fn(*mut c_void, u32) =
+                core::mem::transmute(0x6000_4244usize);
+            call(window, flags);
+        }
+    }
+    /// # Safety
+    /// Requires a live PEG window and the requirements in [`self`].
+    pub unsafe fn remove_status(window: *mut c_void, flags: u32) {
+        unsafe {
+            let call: unsafe extern "C" fn(*mut c_void, u32) =
+                core::mem::transmute(0x6000_4238usize);
+            call(window, flags);
+        }
+    }
+    /// Experimental CDTimer visibility calls; hide sends message 7, show sends 8.
+    ///
+    /// # Safety
+    /// Both objects must remain live, including while hidden. See [`self`].
+    pub unsafe fn set_visible(presentation: *mut c_void, window: *mut c_void, visible: bool) {
+        unsafe {
+            let address = if visible {
+                0x6000_5c8cusize
+            } else {
+                0x6000_5c88usize
+            };
+            let call: unsafe extern "C" fn(*mut c_void, *mut c_void) =
+                core::mem::transmute(address);
+            call(presentation, window);
+        }
+    }
     /// # Safety
     /// The address, object lifetime and event-context requirements in [`self`] apply.
     pub unsafe fn dec_window_ctor(window: *mut c_void, style: u16) -> *mut c_void {
@@ -213,14 +259,12 @@ pub mod raw {
     }
     /// # Safety
     /// The address, object lifetime and event-context requirements in [`self`] apply.
-    pub unsafe fn set_current(presentation: *mut c_void, target: *mut c_void) {
+    pub unsafe fn move_focus(presentation: *mut c_void, target: *mut c_void) {
         unsafe {
-            // PCConnect/AppMain.bin 0x1564c: inline current-window setter.
-            presentation
-                .cast::<u8>()
-                .add(0x18c)
-                .cast::<*mut c_void>()
-                .write(target);
+            // DicMain 0x549798: host focus API, not the return-action field at +0x18c.
+            let call: unsafe extern "C" fn(*mut c_void, *mut c_void) =
+                core::mem::transmute(0x6000_5330usize);
+            call(presentation, target);
         }
     }
     /// # Safety

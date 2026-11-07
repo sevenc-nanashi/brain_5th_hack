@@ -9,6 +9,7 @@
   },
   "devDependencies": {
     "@pocketjs/framework": "github:pocket-nexus/pocketjs#8bc0525776efe779ef9592e0b91574cfbc91f60b",
+    "@types/bun": "^1.4.4",
     "solid-js": "1.9.14",
     "typescript": "5.9.3"
   }

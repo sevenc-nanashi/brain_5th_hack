@@ -50,4 +50,6 @@ pub trait Application: 'static {
 pub struct Window {
     pub raw: *mut core::ffi::c_void,
     pub presentation: *mut core::ffi::c_void,
+    /// NUL-terminated executable path owned by the launcher, valid until exit.
+    pub exec_path: *const u8,
 }

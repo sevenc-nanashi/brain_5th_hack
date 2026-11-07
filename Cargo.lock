@@ -143,6 +143,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "brain-resident"
+version = "0.1.0"
+dependencies = [
+ "reflex",
+]
+
+[[package]]
 name = "brain-rom-dumper"
 version = "0.1.0"
 dependencies = [

@@ -9,6 +9,46 @@ pub struct AppContext {
     pub reserved2: *const c_void,
 }
 
+/// CDTimer's independent load slot on V690_H1.
+pub const TIMER_SLOT: u32 = 3;
+
+/// # Safety
+/// V690_H1 only; call from the PEG thread. This reads SharpLib's slot registry.
+#[cfg(all(target_arch = "arm", target_os = "none"))]
+pub unsafe fn timer_slot_in_use() -> bool {
+    unsafe { (0x8604_30e0usize as *const u32).read_volatile() != 0 }
+}
+
+/// Load a separately linked image into CDTimer's slot. Returns null if occupied
+/// or loading fails. SharpLib copies the path and argument before returning.
+///
+/// # Safety
+/// V690_H1, PEG thread only. The image must use entry 0x83400000 and independent
+/// data at 0x86c00000. Its callbacks must never refer to the launching app.
+#[cfg(all(target_arch = "arm", target_os = "none"))]
+pub unsafe fn launch_timer_slot(
+    presentation: *mut c_void,
+    path: &core::ffi::CStr,
+) -> *const AppContext {
+    unsafe {
+        if timer_slot_in_use() {
+            return core::ptr::null();
+        }
+        let launch: unsafe extern "C" fn(
+            *mut c_void,
+            *const u8,
+            *const u8,
+            u32,
+        ) -> *const AppContext = core::mem::transmute(0x8401_0138usize);
+        launch(
+            presentation,
+            path.as_ptr().cast(),
+            c"".as_ptr().cast(),
+            TIMER_SLOT,
+        )
+    }
+}
+
 /// Notify the launcher that this app has finished. This function can return.
 ///
 /// # Safety

@@ -1,0 +1,19 @@
+[package]
+name = "brain-resident"
+version = "0.1.0"
+edition.workspace = true
+
+[features]
+device = ["reflex/alloc", "reflex/experimental-peg", "reflex/panic-screen"]
+
+[dependencies]
+reflex = { path = "../reflex", features = ["text"] }
+
+[[bin]]
+name = "brain-resident"
+required-features = ["device"]
+
+[package.metadata.reflex]
+name = "Resident"
+output = "resident"
+linker = "link.x"

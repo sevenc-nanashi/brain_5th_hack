@@ -8,6 +8,7 @@ use reflex::display::{HEIGHT, WIDTH};
 
 #[derive(Clone, Copy, Default)]
 pub struct Measurements {
+    pub floating: FloatingMeasurements,
     pub bar: BarMeasurements,
     pub fpu: fpu::Measurements,
     pub audio: AudioMeasurements,
@@ -26,6 +27,26 @@ pub struct Measurements {
     pub pressed_flags: i32,
     pub touch_down: bool,
     pub touch: Option<(u16, u16)>,
+}
+
+#[derive(Clone, Copy)]
+pub struct FloatingMeasurements {
+    pub style: u32,
+    pub status: u32,
+    pub active: bool,
+    pub hidden: bool,
+    pub resident: &'static str,
+}
+impl Default for FloatingMeasurements {
+    fn default() -> Self {
+        Self {
+            style: 0x0800_0001,
+            status: 0x4010,
+            active: false,
+            hidden: false,
+            resident: "IDLE",
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -322,6 +343,44 @@ pub fn render(pixels: &mut [u16], m: &Measurements, edge: usize, input: &Input) 
         color: 0xffff,
         scale: 2,
     };
+    if input.mode == Mode::Floating {
+        let f = &m.floating;
+        c.at(28, 24, 0xffff);
+        write!(c, "FLOATING WINDOW").unwrap();
+        c.scale = 1;
+        c.at(28, 80, 0xffe0);
+        write!(c, "STYLE {:08X}", f.style).unwrap();
+        c.at(28, 104, 0xffe0);
+        write!(c, "ADD STATUS {:08X}", f.status).unwrap();
+        c.at(28, 128, 0xffe0);
+        write!(
+            c,
+            "ACTIVE {}  PANEL {}",
+            f.active,
+            if f.hidden { "HIDDEN" } else { "VISIBLE" }
+        )
+        .unwrap();
+        c.at(28, 164, 0xffe0);
+        write!(c, "RESIDENT: {}", f.resident).unwrap();
+        for (i, label) in [
+            "C: CREATE / RECREATE",
+            "D: DESTROY",
+            "H: HIDE / SHOW PANEL",
+            "S: TOGGLE STYLE 08000000",
+            "F: TOGGLE STATUS 00004000",
+            "G: TOGGLE STATUS 00000010",
+            "FLAGS APPLY ON C",
+            "R: START RESIDENT (SLOT 3)",
+        ]
+        .iter()
+        .enumerate()
+        {
+            c.at(28, 230 + i * 24, 0xffff);
+            write!(c, "{label}").unwrap();
+        }
+        status(&mut c, input);
+        return;
+    }
     if input.mode == Mode::Bar {
         c.pixels.fill(0);
         c.at(28, 24, 0xffff);
@@ -730,7 +789,7 @@ pub fn render(pixels: &mut [u16], m: &Measurements, edge: usize, input: &Input) 
     c.at(28, 270, 0xffff);
     write!(c, "LEFT:OFF RIGHT:ON").unwrap();
     c.at(28, 294, 0xffe0);
-    write!(c, "F  FPU TEST     B  OPERATION BAR").unwrap();
+    write!(c, "F  FPU TEST     B  OPERATION BAR     W  FLOATING WINDOW").unwrap();
     c.at(28, 318, 0xffe0);
     write!(c, "SHIFT P: PANIC TEST").unwrap();
     if input.panic_confirm {
@@ -764,6 +823,7 @@ fn status(c: &mut Canvas<'_>, input: &Input) {
         Mode::Audio => "AUDIO",
         Mode::Fpu => "FPU",
         Mode::Bar => "BAR",
+        Mode::Floating => "FLOATING",
     };
     c.at(28, top + 2, 0xffe0);
     write!(

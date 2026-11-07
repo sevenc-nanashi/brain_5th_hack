@@ -13,6 +13,8 @@ use reflex::{
 };
 mod audio;
 mod bar;
+mod floating;
+mod resident;
 const TIMER: u32 = 0x5052;
 const USABLE_WIDTH: usize = 800;
 #[derive(Default)]
@@ -21,7 +23,9 @@ struct Inspector {
     input: Input,
     window: *mut c_void,
     presentation: *mut c_void,
+    exec_path: *const u8,
     audio_keys: u8,
+    floating_keys: u8,
     bar: bar::Bar,
 }
 #[reflex::main]
@@ -47,6 +51,9 @@ impl Inspector {
     unsafe fn message(&mut self, msg: &peg::Message) -> Option<Action> {
         unsafe {
             let window = self.window;
+            self.measurements.floating.active = floating::active();
+            self.measurements.floating.hidden = floating::hidden();
+
             if msg.kind == bar::MESSAGE && self.input.mode == Mode::Bar {
                 let m = &mut self.measurements.bar;
                 m.events = m.events.wrapping_add(1);
@@ -109,6 +116,48 @@ impl Inspector {
                     {
                         input.mode = Mode::Audio;
                     }
+                    if previous_mode == Mode::Floating && input.mode != Mode::Floating {
+                        floating::close();
+                    }
+                    let floating_bit = match msg.param {
+                        0x43 | 0x63 => 1,
+                        0x44 | 0x64 => 2,
+                        0x48 | 0x68 => 4,
+                        0x53 | 0x73 => 8,
+                        0x46 | 0x66 => 16,
+                        0x47 | 0x67 => 32,
+                        0x52 | 0x72 => 64,
+                        _ => 0,
+                    };
+                    let floating_control = input.mode == Mode::Floating && floating_bit != 0;
+                    if msg.kind == peg::PM_KEY_UP {
+                        self.floating_keys &= !floating_bit;
+                    } else if floating_control {
+                        if self.floating_keys & floating_bit == 0 && !input.locked {
+                            match floating_bit {
+                                1 => floating::create(
+                                    window,
+                                    self.presentation,
+                                    m.floating.style,
+                                    m.floating.status,
+                                ),
+                                2 => floating::close(),
+                                4 => floating::toggle_owner(),
+                                8 => m.floating.style ^= 0x0800_0000,
+                                16 => m.floating.status ^= 0x4000,
+                                32 => m.floating.status ^= 0x10,
+                                64 => {
+                                    floating::close();
+                                    m.floating.resident =
+                                        resident::launch(self.presentation, self.exec_path);
+                                }
+                                _ => unreachable!(),
+                            }
+                        }
+                        self.floating_keys |= floating_bit;
+                    }
+                    m.floating.active = floating::active();
+                    m.floating.hidden = floating::hidden();
                     let audio_bit = match msg.param {
                         0x51 | 0x71 => 1, // Q/q: single tone
                         0x57 | 0x77 => 2, // W/w: stream
@@ -166,6 +215,7 @@ impl Inspector {
                         return Some(Action::Exit);
                     }
                     if consumed
+                        || floating_control
                         || bar_control
                         || audio_control
                         || matches!(
@@ -216,6 +266,7 @@ impl Application for Inspector {
     fn mounted(&mut self, window: Window) -> Action {
         self.window = window.raw;
         self.presentation = window.presentation;
+        self.exec_path = window.exec_path;
         unsafe {
             self.sample();
             raw::set_timer(self.window, TIMER, 10, 10);
@@ -223,17 +274,32 @@ impl Application for Inspector {
         Action::Redraw
     }
     fn raw_event(&mut self, message: &peg::Message) -> Option<Action> {
-        unsafe { self.message(message) }
+        unsafe {
+            let action = self.message(message);
+            if floating::hidden() {
+                match action {
+                    Some(Action::Redraw) => Some(Action::None),
+                    Some(Action::RedrawAndBubble) => None,
+                    other => other,
+                }
+            } else {
+                action
+            }
+        }
     }
     fn event(&mut self, _: Event) -> Action {
         Action::None
     }
     fn can_exit(&mut self) -> bool {
         unsafe {
+            if floating::busy() {
+                return false;
+            }
             if !audio::stop(&mut self.measurements.audio) {
                 self.input.mode = Mode::Audio;
                 return false;
             }
+            floating::close();
             raw::kill_timer(self.window, TIMER);
             self.bar.close(&mut self.measurements.bar);
         }

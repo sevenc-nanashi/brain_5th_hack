@@ -17,7 +17,6 @@ struct State {
     context: *const AppContext,
     window: *mut c_void,
     original: *const usize,
-    previous_focus: *mut c_void,
     allocator: &'static SystemAllocator,
 }
 static mut STATE: *mut State = ptr::null_mut();
@@ -57,28 +56,23 @@ pub unsafe fn start<A: Application>(
         VTABLE[peg::VFUNC_DRAW] = draw as *const () as usize;
         *window.cast::<*const usize>() = ptr::addr_of!(VTABLE).cast();
         let presentation = (*context).presentation;
-        let previous_focus = presentation
-            .cast::<u8>()
-            .add(0x18c)
-            .cast::<*mut c_void>()
-            .read();
         STATE = Box::into_raw(Box::new(State {
             application,
             frame,
             context,
             window,
             original,
-            previous_focus,
             allocator,
         }));
         let table = *presentation.cast::<*const usize>();
         let add: unsafe extern "C" fn(*mut c_void, *mut c_void, i32) =
             core::mem::transmute(*table.add(3));
         add(presentation, window, 1);
-        raw::set_current(presentation, window);
+        raw::move_focus(presentation, window);
         let action = (*STATE).application.mounted(crate::Window {
             raw: window,
             presentation,
+            exec_path: (*context).exec_path,
         });
         BUSY = false;
         if CLOSE_PENDING || action == Action::Exit {
@@ -107,7 +101,6 @@ unsafe fn close() {
         STATE = ptr::null_mut();
         let context = (*state).context;
         let allocator = (*state).allocator;
-        raw::set_current((*context).presentation, (*state).previous_focus);
         *(*state).window.cast::<*const usize>() = (*state).original;
         raw::destroy((*state).window, (*state).window);
         drop(Box::from_raw(state));

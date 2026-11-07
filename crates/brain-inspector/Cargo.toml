@@ -17,3 +17,7 @@ required-features = ["device"]
 name = "Inspector"
 output = "inspector"
 assets = ["../reflex/assets/FONT-LICENSE.txt", "assets/RUST-LOGO-LICENSE.txt"]
+
+[[package.metadata.reflex.companions]]
+package = "brain-resident"
+filename = "Resident.bin"

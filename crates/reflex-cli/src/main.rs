@@ -74,6 +74,14 @@ struct App {
     #[serde(default)]
     link_args: Vec<String>,
     inputs: Option<Inputs>,
+    #[serde(default)]
+    companions: Vec<Companion>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Companion {
+    package: String,
+    filename: String,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -115,6 +123,7 @@ fn relative(path: &Path) -> Result<()> {
 }
 
 struct Build<'a> {
+    packages: &'a [Package],
     package: &'a Package,
     app: &'a App,
     target: PathBuf,
@@ -146,6 +155,45 @@ impl Build<'_> {
         cmd
     }
     fn build(&self) -> Result<PathBuf> {
+        self.build_with(&mut Vec::new())
+    }
+    fn build_with(&self, active: &mut Vec<String>) -> Result<PathBuf> {
+        ensure!(
+            !active.contains(&self.package.name),
+            "cyclic companion dependency: {}",
+            self.package.name
+        );
+        active.push(self.package.name.clone());
+        component(&self.app.name)?;
+        component(&self.app.output)?;
+        let mut companions = Vec::new();
+        for companion in &self.app.companions {
+            component(&companion.filename)?;
+            ensure!(
+                companion.filename != "AppMain.bin" && companion.filename != "index.din",
+                "companion filename is reserved: {}",
+                companion.filename
+            );
+            let package = self
+                .packages
+                .iter()
+                .find(|p| p.name == companion.package)
+                .with_context(|| format!("unknown companion package: {}", companion.package))?;
+            let app = package
+                .app()
+                .context("companion lacks [package.metadata.reflex]")?;
+            let child = Build {
+                packages: self.packages,
+                package,
+                app,
+                target: self.target.clone(),
+                objcopy: self.objcopy.clone(),
+            };
+            companions.push((
+                child.build_with(active)?.join("AppMain.bin"),
+                &companion.filename,
+            ));
+        }
         let linker = match &self.app.linker {
             Some(path) => self.root().join(path),
             None => {
@@ -211,6 +259,10 @@ impl Build<'_> {
                 )?;
             }
         }
+        for (source, filename) in companions {
+            fs::copy(source, output.join(filename))?;
+        }
+        active.pop();
         println!("{}", output.display());
         Ok(output)
     }
@@ -352,6 +404,7 @@ fn main() -> Result<()> {
         metadata.workspace_root.join(target)
     };
     let build = Build {
+        packages: &metadata.packages,
         package,
         app,
         target,

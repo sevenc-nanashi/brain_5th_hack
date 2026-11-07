@@ -62,6 +62,17 @@ assets = ["../reflex/assets/FONT-LICENSE.txt"]
 ```
 
 出力は `<target-dir>/my-app/APP/MyApp/`。
+
+別パッケージのバイナリを同梱する場合は `companions` に指定する。
+`build` と `deploy --build` は依存先を先にビルドし、その `AppMain.bin` を指定名でコピーする。
+Inspectorの `Resident.bin` もこの設定で生成するため、Makefileの事前実行は不要。
+循環依存はエラーにする。
+
+```toml
+[[package.metadata.reflex.companions]]
+package = "brain-resident"
+filename = "Resident.bin"
+```
 外部入力がある場合はDoomの `package.metadata.reflex.inputs` を参照。
 入力ディレクトリはtarget-dir基準で、`env`に指定した環境変数へその絶対パスを渡す。
 `inputs.assets`は入力ディレクトリ基準の同梱ファイル。

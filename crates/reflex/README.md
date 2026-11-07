@@ -95,7 +95,7 @@ reflex = { path = "../reflex", features = ["experimental-peg"] }
 
 `peg::raw` は固定アドレスを C ABI で呼ぶ `unsafe fn` を公開する。
 `dec_window_ctor`、`rect_set`、`screen_rect`、`adjust_client`、
-`win_begin_draw`、`win_base_draw`、`get_screen`、`blit`、`set_current`、
+`win_begin_draw`、`win_base_draw`、`get_screen`、`blit`、`move_focus`、
 `set_timer`、`kill_timer`、`destroy` が対象。タイマーの周期はミリ秒ではなく PEG tick。
 各アドレス・ABI を使用中のファームウェアで照合してから呼び出す。
 `blit` は PEG の描画開始・Bitmap 転送・描画終了をまとめたもの。
