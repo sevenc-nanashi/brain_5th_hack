@@ -2,12 +2,14 @@
 pub mod bar_image;
 pub mod fpu;
 pub mod input;
+pub mod power;
 use core::fmt::{self, Write};
 use input::{Input, Mode};
 use reflex::display::{HEIGHT, WIDTH};
 
 #[derive(Clone, Copy, Default)]
 pub struct Measurements {
+    pub power: power::Power,
     pub floating: FloatingMeasurements,
     pub bar: BarMeasurements,
     pub fpu: fpu::Measurements,
@@ -343,6 +345,64 @@ pub fn render(pixels: &mut [u16], m: &Measurements, edge: usize, input: &Input) 
         color: 0xffff,
         scale: 2,
     };
+    if input.mode == Mode::Power {
+        let p = &m.power;
+        c.at(28, 24, 0xffff);
+        write!(c, "POWER REQUEST").unwrap();
+        c.scale = 1;
+        c.at(28, 72, 0xffe0);
+        write!(c, "CONTROL 0001001B   V690_H1").unwrap();
+        for (i, (event, label)) in power::EVENTS.iter().enumerate() {
+            c.at(
+                28,
+                106 + i * 23,
+                if i == p.selected { 0xffe0 } else { 0xffff },
+            );
+            write!(
+                c,
+                "{} {:08X}  {}",
+                if i == p.selected { "*" } else { " " },
+                event,
+                label
+            )
+            .unwrap();
+        }
+        c.at(28, 302, 0xf800);
+        write!(c, "MAY SLEEP, RESTART OR REQUIRE RESET").unwrap();
+        c.at(28, 330, 0xffe0);
+        if p.confirm {
+            write!(
+                c,
+                "RUN {:08X}?  Y  Run    N / ESC  Cancel",
+                power::EVENTS[p.selected].0
+            )
+            .unwrap();
+        } else if p.pending.is_some() {
+            write!(c, "QUEUED    ESC  Cancel").unwrap();
+        } else {
+            write!(c, "UP/DOWN  Select    ENTER  Confirm").unwrap();
+        }
+        c.at(28, 370, 0xffff);
+        if let Some(event) = p.issued {
+            write!(c, "LAST {:08X}  CALLS {}", event, p.calls).unwrap();
+        } else {
+            write!(c, "LAST --").unwrap();
+        }
+        c.at(28, 396, 0xffff);
+        if let Some(result) = p.result {
+            write!(
+                c,
+                "RETURN {:08X}  ELAPSED {} MS",
+                result,
+                p.elapsed_us / 1000
+            )
+            .unwrap();
+        } else {
+            write!(c, "RETURN --").unwrap();
+        }
+        status(&mut c, input);
+        return;
+    }
     if input.mode == Mode::Floating {
         let f = &m.floating;
         c.at(28, 24, 0xffff);
@@ -791,7 +851,7 @@ pub fn render(pixels: &mut [u16], m: &Measurements, edge: usize, input: &Input) 
     c.at(28, 294, 0xffe0);
     write!(c, "F  FPU TEST     B  OPERATION BAR     W  FLOATING WINDOW").unwrap();
     c.at(28, 318, 0xffe0);
-    write!(c, "SHIFT P: PANIC TEST").unwrap();
+    write!(c, "S  POWER TEST     SHIFT P  PANIC TEST").unwrap();
     if input.panic_confirm {
         c.at(28, 350, 0xf800);
         write!(c, "PANIC? Y:YES N:NO").unwrap();
@@ -824,6 +884,7 @@ fn status(c: &mut Canvas<'_>, input: &Input) {
         Mode::Fpu => "FPU",
         Mode::Bar => "BAR",
         Mode::Floating => "FLOATING",
+        Mode::Power => "POWER",
     };
     c.at(28, top + 2, 0xffe0);
     write!(

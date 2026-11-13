@@ -15,6 +15,7 @@ pub enum Mode {
     Fpu,
     Bar,
     Floating,
+    Power,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -124,10 +125,15 @@ impl Input {
             return true;
         }
         if self.mode == Mode::Settings
-            && matches!(event.key, 0x46 | 0x66 | 0x42 | 0x62 | 0x57 | 0x77)
+            && matches!(
+                event.key,
+                0x46 | 0x66 | 0x42 | 0x62 | 0x57 | 0x77 | 0x53 | 0x73
+            )
         {
             if down && !self.locked && !self.panic_confirm {
-                self.mode = if matches!(event.key, 0x42 | 0x62) {
+                self.mode = if matches!(event.key, 0x53 | 0x73) {
+                    Mode::Power
+                } else if matches!(event.key, 0x42 | 0x62) {
                     Mode::Bar
                 } else if matches!(event.key, 0x57 | 0x77) {
                     Mode::Floating

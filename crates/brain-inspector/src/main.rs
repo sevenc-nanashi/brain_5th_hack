@@ -198,8 +198,20 @@ impl Inspector {
                     } else if msg.kind == peg::PM_KEY_UP {
                         self.audio_keys &= !audio_bit;
                     }
+                    let power_control = m.power.key(
+                        KeyEvent {
+                            key: msg.param,
+                            kind: msg.kind,
+                            flags: m.flags,
+                        },
+                        input.mode == Mode::Power,
+                        input.locked,
+                    );
                     self.measurements = m;
                     self.input = input;
+                    if power_control {
+                        return Some(Action::Redraw);
+                    }
                     if let Some(confirmed) = self.input.panic_test(KeyEvent {
                         key: msg.param,
                         kind: msg.kind,
@@ -246,6 +258,31 @@ impl Inspector {
                 peg::PM_TIMER if msg.param == TIMER as u16 => {
                     let mut m = self.measurements;
                     audio::maintain(window, &mut m.audio);
+                    if self.input.mode != Mode::Power || self.input.locked {
+                        m.power.cancel();
+                    }
+                    if let Some(event) = m.power.take_request() {
+                        // The key event has already redrawn the queued request. Dispatch once from the timer.
+                        let started = runtime::micros();
+                        let call: unsafe extern "C" fn(
+                            u32,
+                            *const u32,
+                            u32,
+                            *mut c_void,
+                            u32,
+                            *mut u32,
+                        ) -> u32 = core::mem::transmute(0x6000_63c0usize);
+                        let result = call(
+                            0x1001b,
+                            &event,
+                            4,
+                            core::ptr::null_mut(),
+                            0,
+                            core::ptr::null_mut(),
+                        );
+                        m.power.result = Some(result);
+                        m.power.elapsed_us = runtime::micros().saturating_sub(started);
+                    }
                     if core::mem::take(&mut self.input.fpu_requested)
                         && self.input.mode == Mode::Fpu
                         && !self.input.locked
@@ -291,6 +328,7 @@ impl Application for Inspector {
         Action::None
     }
     fn can_exit(&mut self) -> bool {
+        self.measurements.power.cancel();
         unsafe {
             if floating::busy() {
                 return false;
